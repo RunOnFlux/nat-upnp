@@ -15,7 +15,8 @@
   "scripts": {
     "build": "tsc",
     "watch": "tsc --watch",
-    "test": "node ./build/test/index.test.js"
+    "test": "node ./build/test/index.test.js",
+    "flux-test": "node ./build/test/index.flux-test.js"
   },
   "dependencies": {
     "axios": "^0.24.0",

@@ -15,6 +15,7 @@ cd node-nat-upnp
 git checkout flux-test
 
 npm i
+npm run build
 npm run flux-test
 
 echo "**********************************"

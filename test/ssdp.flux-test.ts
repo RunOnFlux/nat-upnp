@@ -12,7 +12,7 @@ setupTest("NAT-UPNP/Ssdp", (opts) => {
     client.close();
   });
 
-  opts.run("Find router device to Verify uPnP is enabled", async () => {
+  opts.run("Find router device. *** If this hangs you may need to enable uPnP on your router ***", async () => {
     const p = client.search(
       "urn:schemas-upnp-org:device:InternetGatewayDevice:1"
     );

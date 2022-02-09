@@ -15,7 +15,6 @@ fi
 
 git clone https://github.com/RunOnFlux/node-nat-upnp.git
 cd node-nat-upnp
-git checkout flux-test
 
 npm i
 npm run build

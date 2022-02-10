@@ -38,7 +38,6 @@ setupTest("NAT-UPNP/Client", (opts) => {
     const ip = await client.getPublicIp();
     const gw = await client.getGateway();
     console.log("Public IP %s Gateway IP %s", ip, gw.address);
-    console.log(client);
     return net.isIP(ip) !== 0;
   });
 

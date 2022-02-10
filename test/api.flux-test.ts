@@ -41,33 +41,28 @@ setupTest("NAT-UPNP/Client", (opts) => {
     return net.isIP(ip) !== 0;
   });
 
-  opts.run("Get and clear Port Mappings", async () => {
-      await client.createMapping({
-        public: 4321,
-        private: 5432,
-        ttl: 0
-      });
+  //opts.run("Get and clear Port Mappings", async () => {
+  opts.run("Display Port Mappings", async () => {
     const mappings = await getMapping();
     if (mappings.length == 0) return true;
     for (i=0;i<mappings.length;i++) {
       console.log("Public: ", mappings[i].public.port, " Private: ", mappings[i].private.port, " Host: ", mappings[i].private.host);
-      await client.removeMapping({ public: mappings[i].public.port });
+      // await client.removeMapping({ public: mappings[i].public.port });
     }
     return true;
   });
   
-  opts.run("Port mappings cleared", async () => {
-    var passed:boolean;
-    passed = true;
-    const mappings = await getMapping();
-    console.log("Mapping size ", mappings.length, mappings);
-    if (mappings.length == 0) return true;
-    for (i=0;i<mappings.length;i++) {
-       console.log("Public: ", mappings[i].public.port, " Private: ", mappings[i].private.port, " Host: ", mappings[i].private.host);
-       passed = false;
-    }
-    return passed;
-  });
+//  opts.run("Port mappings cleared", async () => {
+//    passed = true;
+//    const mappings = await getMapping();
+//    console.log("Mapping size ", mappings.length, mappings);
+//    if (mappings.length == 0) return true;
+//    for (i=0;i<mappings.length;i++) {
+//       console.log("Public: ", mappings[i].public.port, " Private: ", mappings[i].private.port, " Host: ", mappings[i].private.host);
+//       passed = false;
+//    }
+//    return passed;
+//  });
   
   opts.run("Port mapping", async () => {
     var i:number;

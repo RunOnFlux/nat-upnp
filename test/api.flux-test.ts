@@ -42,7 +42,7 @@ setupTest("NAT-UPNP/Client", (opts) => {
   });
 
   //opts.run("Get and clear Port Mappings", async () => {
-  opts.run("Display Port Mappings", async () => {
+  opts.run("Display Existing Port Mappings", async () => {
     const mappings = await getMapping();
     if (mappings.length == 0) return true;
     for (i=0;i<mappings.length;i++) {
@@ -69,7 +69,7 @@ setupTest("NAT-UPNP/Client", (opts) => {
     for (i=0;i<5;i++) {
       console.log("%d:Map Random port %d to Local Port %d", i+1, globalPort[i], localPort[i]);
       await client.createMapping({
-        public: globalPort[i],
+        public: {port:globalPort[i], host:""},
         private: localPort[i],
         ttl: 0
       });

@@ -109,6 +109,6 @@ export class TestOptions {
     return this.isRunning;
   }
 }
-
+console.log("uPnP Test Version 0.8");
 import "./ssdp.flux-test";
 import "./api.flux-test";

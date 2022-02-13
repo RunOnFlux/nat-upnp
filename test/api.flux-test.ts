@@ -96,7 +96,7 @@ opts.run("Port unmapping", async () => {
   var i:number;
   for (i=0;i<5;i++) {
     console.log("Remove Mapping for %d", globalPort[i]);
-    await client.removeMapping({ public: globalPort[i] });
+    await client.removeMapping({ public: {port:globalPort[i], host:""} });
   }
   return true;
 });

@@ -16,6 +16,8 @@ export class Client implements IClient {
     return this.getGateway().then(({ gateway, address }) => {
       const ports = normalizeOptions(options);
 
+      if (typeof ports.remote.host === 'undefined') ports.remote.host = "";
+
       return gateway.run("AddPortMapping", [
         ["NewRemoteHost", ports.remote.host + ""],
         ["NewExternalPort", ports.remote.port + ""],
@@ -37,6 +39,8 @@ export class Client implements IClient {
   ): Promise<RawResponse> {
     return this.getGateway().then(({ gateway }) => {
       const ports = normalizeOptions(options);
+
+      if (typeof ports.remote.host === 'undefined') ports.remote.host = "";
 
       return gateway.run("DeletePortMapping", [
         ["NewRemoteHost", ports.remote.host + ""],

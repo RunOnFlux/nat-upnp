@@ -5,18 +5,18 @@ Port mapping via UPnP APIs
 ## Installation
 
 ```bash
-npm i git+https://github.com/kaden-sharpin/node-nat-upnp.git
+npm i @runonflux/nat-upnp
 ```
 
 ## Usage
 
 ```javascript
 // using ES modules
-import { Client } from "nat-upnp";
+import { Client } from "@runonflux/nat-upnp";
 const client = new Client();
 
 // using node require
-const natUpnp = require("nat-upnp");
+const natUpnp = require("@runonflux/nat-upnp");
 const client = new natUpnp.Client();
 
 client

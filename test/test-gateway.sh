@@ -13,8 +13,8 @@ if [ -z "$NPM" ]; then
   exit 2;
 fi
 
-git clone https://github.com/RunOnFlux/node-nat-upnp.git
-cd node-nat-upnp
+git clone https://github.com/RunOnFlux/nat-upnp.git
+cd nat-upnp
 
 npm i
 npm run build
@@ -28,5 +28,5 @@ echo "The tests can be re-run with the command:"
 echo "npm run flux-test"
 echo ""
 echo "You can remove everything that was downloaded with:"
-echo "rm -rf node-nat-upnp"
+echo "rm -rf nat-upnp"
 echo ""

@@ -25,6 +25,8 @@ class Client {
             return this.getGateway().then(({ gateway, address }) => {
                 var _a;
                 const ports = normalizeOptions(options);
+                if (typeof ports.remote.host === 'undefined')
+                    ports.remote.host = "";
                 return gateway.run("AddPortMapping", [
                     ["NewRemoteHost", ports.remote.host + ""],
                     ["NewExternalPort", ports.remote.port + ""],
@@ -45,6 +47,8 @@ class Client {
         return __awaiter(this, void 0, void 0, function* () {
             return this.getGateway().then(({ gateway }) => {
                 const ports = normalizeOptions(options);
+                if (typeof ports.remote.host === 'undefined')
+                    ports.remote.host = "";
                 return gateway.run("DeletePortMapping", [
                     ["NewRemoteHost", ports.remote.host + ""],
                     ["NewExternalPort", ports.remote.port + ""],

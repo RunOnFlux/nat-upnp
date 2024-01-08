@@ -1,7 +1,6 @@
 import net from "net";
 import { setupTest } from "./index.flux-test";
 import { Client } from "../src";
-import internal from "stream";
 
 setupTest("NAT-UPNP/Client", (opts) => {
   let client: Client;
@@ -23,9 +22,8 @@ setupTest("NAT-UPNP/Client", (opts) => {
       console.log("No Ports Mapped");
       return [];
     }
-  
   }
-  
+
   opts.runBefore(() => {
     client = new Client();
   });
@@ -41,6 +39,16 @@ setupTest("NAT-UPNP/Client", (opts) => {
     return net.isIP(ip) !== 0;
   });
 
+  opts.run("Cache gateway and run without SSDP", async () => {
+    const gwInfo = await client.getGateway();
+    console.log(`Gateway URL is: ${gwInfo.gateway.description}`)
+
+    const nonSsdpClient = new Client({url: gwInfo.gateway.description});
+    const nonSsdpGwInfo = await nonSsdpClient.getGateway();
+    nonSsdpClient.close();
+    return nonSsdpGwInfo.address === gwInfo.address;
+  });
+
   opts.run("Display Existing Port Mappings", async () => {
     const mappings = await getMapping();
     if (mappings.length == 0) return true;
@@ -49,7 +57,7 @@ setupTest("NAT-UPNP/Client", (opts) => {
     }
     return true;
   });
-  
+
   opts.run("Port mapping", async () => {
     var i:number;
     for (i=0;i<5;i++) {
@@ -77,15 +85,14 @@ setupTest("NAT-UPNP/Client", (opts) => {
     return passed;
   });
 
-
-opts.run("Port unmapping", async () => {
-  var i:number;
-  for (i=0;i<5;i++) {
-    console.log("Remove Mapping for %d", globalPort[i]);
-    await client.removeMapping({ public: globalPort[i] });
-  }
-  return true;
-});
+  opts.run("Port unmapping", async () => {
+    var i:number;
+    for (i=0;i<5;i++) {
+      console.log("Remove Mapping for %d", globalPort[i]);
+      await client.removeMapping({ public: globalPort[i] });
+    }
+    return true;
+  });
 
   opts.run("Verify port unmapping", async () => {
     var i:number;

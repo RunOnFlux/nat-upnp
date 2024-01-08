@@ -63,7 +63,7 @@ export class Client implements IClient {
       const data = (await gateway
         .run("GetGenericPortMappingEntry", [["NewPortMappingIndex", i++]])
         .catch((err) => {
-          if (i !== 1) {
+          if (i !== 1 || /ArrayIndexInvalid/.test(err?.response?.data)) {
             end = true;
           }
         }))!;

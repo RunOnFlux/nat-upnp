@@ -20,12 +20,12 @@ export declare class Ssdp implements ISsdp {
     close(): void;
 }
 export default Ssdp;
-declare type SearchArgs = [Record<string, string>, string];
-export declare type SearchCallback = (...args: SearchArgs) => void;
-declare type SearchEvent = <E extends Events>(ev: E, ...args: E extends "device" ? SearchArgs : []) => boolean;
-declare type Events = "device" | "end";
-declare type Event<E extends Events> = E extends "device" ? SearchCallback : () => void;
-declare type EventListener<T> = <E extends Events>(ev: E, callback: Event<E>) => T;
+type SearchArgs = [Record<string, string>, string];
+export type SearchCallback = (...args: SearchArgs) => void;
+type SearchEvent = <E extends Events>(ev: E, ...args: E extends "device" ? SearchArgs : []) => boolean;
+type Events = "device" | "end";
+type Event<E extends Events> = E extends "device" ? SearchCallback : () => void;
+type EventListener<T> = <E extends Events>(ev: E, callback: Event<E>) => T;
 export interface SsdpEmitter extends EventEmitter {
     removeListener: EventListener<this>;
     addListener: EventListener<this>;

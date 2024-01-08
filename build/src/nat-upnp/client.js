@@ -18,7 +18,9 @@ const ssdp_1 = __importDefault(require("./ssdp"));
 class Client {
     constructor(options = {}) {
         this.ssdp = new ssdp_1.default();
+        this.gatewayInfo = null;
         this.timeout = options.timeout || 1800;
+        this.url = options.url || null;
     }
     createMapping(options) {
         return __awaiter(this, void 0, void 0, function* () {
@@ -70,7 +72,8 @@ class Client {
                 const data = (yield gateway
                     .run("GetGenericPortMappingEntry", [["NewPortMappingIndex", i++]])
                     .catch((err) => {
-                    if (i !== 1) {
+                    var _a;
+                    if (i !== 1 || /ArrayIndexInvalid/.test((_a = err === null || err === void 0 ? void 0 : err.response) === null || _a === void 0 ? void 0 : _a.data)) {
                         end = true;
                     }
                 }));
@@ -132,6 +135,14 @@ class Client {
     }
     getGateway() {
         return __awaiter(this, void 0, void 0, function* () {
+            if (this.url) {
+                if (!this.gatewayInfo) {
+                    const address = new URL(this.url).hostname;
+                    this.gatewayInfo = { gateway: new device_1.default(this.url), address };
+                }
+                // resolve immediately without running SSDP.
+                return Promise.resolve(this.gatewayInfo);
+            }
             let timeouted = false;
             const p = this.ssdp.search("urn:schemas-upnp-org:device:InternetGatewayDevice:1");
             return new Promise((s, r) => {

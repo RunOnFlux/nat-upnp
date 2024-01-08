@@ -19,7 +19,7 @@ export default natupnp;
  * Please look up the protol documentation if you wanna do
  * lower level communication.
  */
-export declare type RawResponse = Partial<Record<string, {
+export type RawResponse = Partial<Record<string, {
     "@": {
         "xmlns:u": string;
     };

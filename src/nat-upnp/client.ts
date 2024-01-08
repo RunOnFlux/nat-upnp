@@ -246,7 +246,7 @@ export interface IClient {
   /**
    * Allows bypass of SSDP in situations with multicast issues
   */
-  url: string;
+  url: string | null;
   /**
    * Create a new port mapping
    * @param options Options for the new port mapping

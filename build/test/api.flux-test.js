@@ -54,7 +54,7 @@ const src_1 = require("../src");
         const upnpInfo = yield client.getGateway();
         console.log(`Gateway URL is: ${upnpInfo.gateway.description}`);
         console.log(`Gatway address is ${upnpInfo.localAddress}`);
-        const nonSsdpClient = new src_1.Client({ url: upnpInfo.gateway.description });
+        const nonSsdpClient = new src_1.Client(upnpInfo);
         const nonSsdpupnpInfo = yield nonSsdpClient.getGateway();
         console.log(`Non Ssdp Gateway address is ${nonSsdpupnpInfo.localAddress}`);
         return nonSsdpupnpInfo.localAddress === upnpInfo.localAddress;

@@ -44,7 +44,7 @@ setupTest("NAT-UPNP/Client", (opts) => {
     console.log(`Gateway URL is: ${upnpInfo.gateway.description}`)
     console.log(`Gatway address is ${upnpInfo.localAddress}`);
 
-    const nonSsdpClient = new Client({url: upnpInfo.gateway.description});
+    const nonSsdpClient = new Client(upnpInfo);
     const nonSsdpupnpInfo = await nonSsdpClient.getGateway();
     console.log(`Non Ssdp Gateway address is ${nonSsdpupnpInfo.localAddress}`)
     return nonSsdpupnpInfo.localAddress === upnpInfo.localAddress;

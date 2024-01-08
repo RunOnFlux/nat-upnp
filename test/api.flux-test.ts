@@ -42,10 +42,11 @@ setupTest("NAT-UPNP/Client", (opts) => {
   opts.run("Cache gateway and run without SSDP", async () => {
     const gwInfo = await client.getGateway();
     console.log(`Gateway URL is: ${gwInfo.gateway.description}`)
+    console.log(`Gatway address is ${gwInfo.address}`);
 
     const nonSsdpClient = new Client({url: gwInfo.gateway.description});
     const nonSsdpGwInfo = await nonSsdpClient.getGateway();
-    nonSsdpClient.close();
+    console.log(`Non Ssdp Gateway address is ${nonSsdpGwInfo.address}`)
     return nonSsdpGwInfo.address === gwInfo.address;
   });
 

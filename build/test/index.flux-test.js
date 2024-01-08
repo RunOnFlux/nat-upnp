@@ -26,7 +26,7 @@ function runNextInQueue(prev) {
         footer(prev.length);
         const [name, opts] = (_a = queue.shift()) !== null && _a !== void 0 ? _a : [];
         if (!name || !opts)
-            return;
+            process.exit();
         header(name);
         opts.startTests().then(() => runNextInQueue(name));
     });

@@ -38,7 +38,7 @@ export class Ssdp implements ISsdp {
       if (this.closed) return;
 
       // Parse response
-      this.parseResponse(message.toString(), socket.address().address);
+      this.parseResponse(message.toString(), socket.address as any as string);
     });
 
     // Bind in next tick (sockets should be me in this.sockets array)

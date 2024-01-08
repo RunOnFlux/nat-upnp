@@ -3,11 +3,14 @@ import Device from "./device";
 import Ssdp from "./ssdp";
 
 export class Client implements IClient {
-  readonly timeout: number;
-  readonly ssdp = new Ssdp();
+  private readonly timeout: number;
+  private readonly ssdp = new Ssdp();
+  private gatewayInfo: gatewayInfo | null = null;
+  url: string | null;
 
-  constructor(options: { timeout?: number } = {}) {
+  constructor(options: { timeout?: number, url?: string } = {}) {
     this.timeout = options.timeout || 1800;
+    this.url = options.url || null;
   }
 
   public async createMapping(
@@ -132,13 +135,22 @@ export class Client implements IClient {
     });
   }
 
-  public async getGateway() {
+  public async getGateway(): Promise<gatewayInfo> {
+    if (this.url) {
+      if (!this.gatewayInfo) {
+        const address = new URL(this.url).hostname;
+        this.gatewayInfo = { gateway: new Device(this.url), address }
+      }
+      // resolve immediately without running SSDP.
+      return Promise.resolve(this.gatewayInfo);
+    }
+
     let timeouted = false;
     const p = this.ssdp.search(
       "urn:schemas-upnp-org:device:InternetGatewayDevice:1"
     );
 
-    return new Promise<{ gateway: Device; address: string }>((s, r) => {
+    return new Promise<gatewayInfo>((s, r) => {
       const timeout = setTimeout(() => {
         timeouted = true;
         p.emit("end");
@@ -222,6 +234,11 @@ export interface GetMappingOpts {
   description?: RegExp | string;
 }
 
+export interface gatewayInfo {
+  gateway: Device;
+  address: string;
+}
+
 /**
  * Main client interface.
  */
@@ -248,7 +265,7 @@ export interface IClient {
   /**
    * Get the gateway device for communication
    */
-  getGateway(): Promise<{ gateway: Device; address: string }>;
+  getGateway(): Promise<gatewayInfo>;
   /**
    * Close the underlaying sockets and resources
    */

@@ -28,12 +28,12 @@ class Ssdp {
     }
     createSocket(iface) {
         const socket = dgram_1.default.createSocket(iface.family === "IPv4" ? "udp4" : "udp6");
-        socket.on("message", (message) => {
+        socket.on("message", (message, remote) => {
             // Ignore messages after closing sockets
             if (this.closed)
                 return;
             // Parse response
-            this.parseResponse(message.toString(), socket.address);
+            this.parseResponse(message.toString(), remote.address);
         });
         // Bind in next tick (sockets should be me in this.sockets array)
         process.nextTick(() => {

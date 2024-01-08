@@ -18,13 +18,18 @@ const ssdp_1 = __importDefault(require("./ssdp"));
 class Client {
     constructor(options = {}) {
         this.ssdp = new ssdp_1.default();
-        this.gatewayInfo = null;
+        this.upnpInfo = null;
+        if (options.url && !(options.localAddress)) {
+            throw new Error("`localAddress` must be supplied if using `url`");
+        }
         this.timeout = options.timeout || 1800;
         this.url = options.url || null;
+        this.localAddress = options.localAddress || null;
+        this.cacheGateway = options.cacheGateway || false;
     }
     createMapping(options) {
         return __awaiter(this, void 0, void 0, function* () {
-            return this.getGateway().then(({ gateway, address }) => {
+            return this.getGateway().then(({ gateway, localAddress }) => {
                 var _a;
                 const ports = normalizeOptions(options);
                 if (typeof ports.remote.host === 'undefined')
@@ -37,7 +42,7 @@ class Client {
                         options.protocol ? options.protocol.toUpperCase() : "TCP",
                     ],
                     ["NewInternalPort", ports.internal.port + ""],
-                    ["NewInternalClient", ports.internal.host || address],
+                    ["NewInternalClient", ports.internal.host || localAddress],
                     ["NewEnabled", 1],
                     ["NewPortMappingDescription", options.description || "node:nat:upnp"],
                     ["NewLeaseDuration", (_a = options.ttl) !== null && _a !== void 0 ? _a : 60 * 30],
@@ -64,7 +69,7 @@ class Client {
     }
     getMappings(options = {}) {
         return __awaiter(this, void 0, void 0, function* () {
-            const { gateway, address } = yield this.getGateway();
+            const { gateway, localAddress } = yield this.getGateway();
             let i = 0;
             let end = false;
             const results = [];
@@ -100,7 +105,7 @@ class Client {
                     // temporary, so typescript will compile
                     local: false,
                 };
-                result.local = result.private.host === address;
+                result.local = result.private.host === localAddress;
                 if (options.local && !result.local) {
                     continue;
                 }
@@ -123,7 +128,7 @@ class Client {
     }
     getPublicIp() {
         return __awaiter(this, void 0, void 0, function* () {
-            return this.getGateway().then(({ gateway, address }) => __awaiter(this, void 0, void 0, function* () {
+            return this.getGateway().then(({ gateway, localAddress }) => __awaiter(this, void 0, void 0, function* () {
                 var _a;
                 const data = yield gateway.run("GetExternalIPAddress", []);
                 const key = Object.keys(data || {}).find((k) => /^GetExternalIPAddressResponse$/.test(k));
@@ -136,28 +141,34 @@ class Client {
     getGateway() {
         return __awaiter(this, void 0, void 0, function* () {
             if (this.url) {
-                if (!this.gatewayInfo) {
-                    const address = new URL(this.url).hostname;
-                    this.gatewayInfo = { gateway: new device_1.default(this.url), address };
+                if (!this.upnpInfo) {
+                    this.upnpInfo = { gateway: new device_1.default(this.url), localAddress: this.localAddress };
                 }
                 // resolve immediately without running SSDP.
-                return Promise.resolve(this.gatewayInfo);
+                return Promise.resolve(this.upnpInfo);
             }
             let timeouted = false;
             const p = this.ssdp.search("urn:schemas-upnp-org:device:InternetGatewayDevice:1");
-            return new Promise((s, r) => {
+            return new Promise((resolve, reject) => {
                 const timeout = setTimeout(() => {
                     timeouted = true;
                     p.emit("end");
-                    r(new Error("Connection timed out while searching for the gateway."));
+                    // this will only happen after at least one call. (If cacheGateway is set below)
+                    if (this.upnpInfo) {
+                        resolve(this.upnpInfo);
+                    }
+                    reject(new Error("Connection timed out while searching for the gateway."));
                 }, this.timeout);
-                p.on("device", (info, address) => {
+                p.on("device", (info, localAddress) => {
                     if (timeouted)
                         return;
                     p.emit("end");
                     clearTimeout(timeout);
-                    // Create gateway
-                    s({ gateway: new device_1.default(info.location), address });
+                    const upnpInfo = { gateway: new device_1.default(info.location), localAddress };
+                    if (this.cacheGateway) {
+                        this.upnpInfo = upnpInfo;
+                    }
+                    resolve(upnpInfo);
                 });
             });
         });

@@ -35,19 +35,19 @@ setupTest("NAT-UPNP/Client", (opts) => {
   opts.run("Get public ip address", async () => {
     const ip = await client.getPublicIp();
     const gw = await client.getGateway();
-    console.log("Public IP %s Gateway IP %s", ip, gw.address);
+    console.log("Public IP %s Gateway IP %s", ip, gw.localAddress);
     return net.isIP(ip) !== 0;
   });
 
   opts.run("Cache gateway and run without SSDP", async () => {
-    const gwInfo = await client.getGateway();
-    console.log(`Gateway URL is: ${gwInfo.gateway.description}`)
-    console.log(`Gatway address is ${gwInfo.address}`);
+    const upnpInfo = await client.getGateway();
+    console.log(`Gateway URL is: ${upnpInfo.gateway.description}`)
+    console.log(`Gatway address is ${upnpInfo.localAddress}`);
 
-    const nonSsdpClient = new Client({url: gwInfo.gateway.description});
-    const nonSsdpGwInfo = await nonSsdpClient.getGateway();
-    console.log(`Non Ssdp Gateway address is ${nonSsdpGwInfo.address}`)
-    return nonSsdpGwInfo.address === gwInfo.address;
+    const nonSsdpClient = new Client({url: upnpInfo.gateway.description});
+    const nonSsdpupnpInfo = await nonSsdpClient.getGateway();
+    console.log(`Non Ssdp Gateway address is ${nonSsdpupnpInfo.localAddress}`)
+    return nonSsdpupnpInfo.localAddress === upnpInfo.localAddress;
   });
 
   opts.run("Display Existing Port Mappings", async () => {

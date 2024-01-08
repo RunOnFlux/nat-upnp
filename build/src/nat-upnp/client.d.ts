@@ -3,17 +3,21 @@ import Device from "./device";
 export declare class Client implements IClient {
     private readonly timeout;
     private readonly ssdp;
-    private gatewayInfo;
+    private readonly localAddress;
+    private readonly cacheGateway;
+    private upnpInfo;
     url: string | null;
     constructor(options?: {
         timeout?: number;
         url?: string;
+        localAddress?: string;
+        cacheGateway?: boolean;
     });
     createMapping(options: NewPortMappingOpts): Promise<RawResponse>;
     removeMapping(options: DeletePortMappingOpts): Promise<RawResponse>;
     getMappings(options?: GetMappingOpts): Promise<Mapping[]>;
     getPublicIp(): Promise<string>;
-    getGateway(): Promise<gatewayInfo>;
+    getGateway(): Promise<upnpInfo>;
     close(): void;
 }
 export default Client;
@@ -55,9 +59,9 @@ export interface GetMappingOpts {
     local?: boolean;
     description?: RegExp | string;
 }
-export interface gatewayInfo {
+export interface upnpInfo {
     gateway: Device;
-    address: string;
+    localAddress: string;
 }
 /**
  * Main client interface.
@@ -89,7 +93,7 @@ export interface IClient {
     /**
      * Get the gateway device for communication
      */
-    getGateway(): Promise<gatewayInfo>;
+    getGateway(): Promise<upnpInfo>;
     /**
      * Close the underlaying sockets and resources
      */

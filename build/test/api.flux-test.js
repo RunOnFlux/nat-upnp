@@ -47,17 +47,17 @@ const src_1 = require("../src");
     opts.run("Get public ip address", () => __awaiter(void 0, void 0, void 0, function* () {
         const ip = yield client.getPublicIp();
         const gw = yield client.getGateway();
-        console.log("Public IP %s Gateway IP %s", ip, gw.address);
+        console.log("Public IP %s Gateway IP %s", ip, gw.localAddress);
         return net_1.default.isIP(ip) !== 0;
     }));
     opts.run("Cache gateway and run without SSDP", () => __awaiter(void 0, void 0, void 0, function* () {
-        const gwInfo = yield client.getGateway();
-        console.log(`Gateway URL is: ${gwInfo.gateway.description}`);
-        console.log(`Gatway address is ${gwInfo.address}`);
-        const nonSsdpClient = new src_1.Client({ url: gwInfo.gateway.description });
-        const nonSsdpGwInfo = yield nonSsdpClient.getGateway();
-        console.log(`Non Ssdp Gateway address is ${nonSsdpGwInfo.address}`);
-        return nonSsdpGwInfo.address === gwInfo.address;
+        const upnpInfo = yield client.getGateway();
+        console.log(`Gateway URL is: ${upnpInfo.gateway.description}`);
+        console.log(`Gatway address is ${upnpInfo.localAddress}`);
+        const nonSsdpClient = new src_1.Client({ url: upnpInfo.gateway.description });
+        const nonSsdpupnpInfo = yield nonSsdpClient.getGateway();
+        console.log(`Non Ssdp Gateway address is ${nonSsdpupnpInfo.localAddress}`);
+        return nonSsdpupnpInfo.localAddress === upnpInfo.localAddress;
     }));
     opts.run("Display Existing Port Mappings", () => __awaiter(void 0, void 0, void 0, function* () {
         const mappings = yield getMapping();

@@ -19,7 +19,7 @@ export class Device implements IDevice {
     return axios
       .get(url)
       .then(({ data }) => new XMLParser().parse(data))
-      .catch(() => new Error("Failed to lookup device description"));
+      .catch(() => { throw new Error("Router error. Failed to lookup device description") });
   }
   public async getService(types: string[]) {
     return this.getXML(this.description).then(({ root: xml }) => {

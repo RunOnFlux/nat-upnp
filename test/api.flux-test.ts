@@ -1,6 +1,7 @@
 import net from "net";
 import { setupTest } from "./index.flux-test";
-import { Client } from "../src";
+import { Client, Mapping } from "../src";
+import { execSync } from "node:child_process";
 
 setupTest("NAT-UPNP/Client", (opts) => {
   let client: Client;
@@ -22,6 +23,15 @@ setupTest("NAT-UPNP/Client", (opts) => {
       console.log("No Ports Mapped");
       return [];
     }
+  }
+
+  function iptablesPresent() {
+    try {
+        execSync('iptables --version', { stdio: 'pipe' });
+    } catch {
+        return false;
+    }
+    return true;
   }
 
   opts.runBefore(() => {
@@ -85,6 +95,50 @@ setupTest("NAT-UPNP/Client", (opts) => {
     }
     return passed;
   });
+
+  if (iptablesPresent()) {
+    opts.run("Verify no SSDP client and gateway caching", async () => {
+      const clientDefault = new Client();
+      const clientCaching = new Client({ cacheGateway: true });
+
+      const upnpInfo = await clientDefault.getGateway();
+
+      const clientNoSsdp = new Client({ url: upnpInfo.gateway.description, localAddress: upnpInfo.localAddress })
+
+      console.log(upnpInfo);
+
+      const defaultMappings = await clientDefault.getMappings();
+
+      console.log("\nDefault client mappings:", defaultMappings);
+
+      console.log("\nPopulating cache for caching client...")
+      await clientCaching.getGateway()
+
+      console.log("\nBlocking SSDP via iptables...")
+      execSync('iptables -A OUTPUT -p udp --dport 1900 -j DROP');
+
+      const mappings1 = await clientCaching.getMappings();
+      console.log("\nCaching client mappings:", mappings1);
+
+      const mappings2 = await clientNoSsdp.getMappings();
+      console.log("\nNo SSDP client mappings:", mappings2);
+
+      let mappings3: Mapping[] | null = null;
+
+      try {
+          mappings3 = await clientDefault.getMappings();
+      } catch (err) {
+        if (err instanceof Error) {
+          console.log("\nDefault client mappings: (caught err):", err.message);
+        }
+      }
+
+      console.log("\nUnblocking SSDP via iptables...\n")
+      execSync('iptables -D OUTPUT -p udp --dport 1900 -j DROP')
+
+      return JSON.stringify(defaultMappings) === JSON.stringify(mappings1) && JSON.stringify(defaultMappings) === JSON.stringify(mappings2) && mappings3 === null;
+    });
+  }
 
   opts.run("Port unmapping", async () => {
     var i:number;

@@ -2,6 +2,9 @@
   "name": "@megachips/nat-upnp",
   "version": "1.1.1",
   "main": "build/src/index",
+  "files": [
+    "/build"
+  ],
   "author": "Fedor Indutny <fedor@indutny.com>, SimplyLinn <https://github.com/SimplyLinn>, Kaden Sharpin <http://github.com/kaden-sharpin>",
   "homepage": "https://github.com/MorningLightMountain713/nat-upnp",
   "license": "MIT",

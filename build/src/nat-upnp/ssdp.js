@@ -107,8 +107,19 @@ class Ssdp {
         return emitter;
     }
     close() {
-        this.sockets.forEach((socket) => socket.close());
-        this.closed = true;
+        // idempotent
+        if (!this.closed) {
+            try {
+                this.sockets.forEach((socket) => socket.close());
+            }
+            catch (_a) {
+                // pass
+            }
+            this.sockets.length = 0;
+            this.closed = true;
+            this.bound = false;
+            this.boundCount = 0;
+        }
     }
 }
 exports.Ssdp = Ssdp;

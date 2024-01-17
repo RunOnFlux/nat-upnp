@@ -30,7 +30,7 @@ class Device {
             return axios_1.default
                 .get(url)
                 .then(({ data }) => new fast_xml_parser_1.XMLParser().parse(data))
-                .catch(() => new Error("Failed to lookup device description"));
+                .catch(() => { throw new Error("Router error. Failed to lookup device description"); });
         });
     }
     getService(types) {

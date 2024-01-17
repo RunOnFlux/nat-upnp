@@ -1,20 +1,23 @@
 import { RawResponse } from "../index";
 import Device from "./device";
-import Ssdp from "./ssdp";
 export declare class Client implements IClient {
-    readonly timeout: number;
-    readonly ssdp: Ssdp;
+    private readonly timeout;
+    private readonly ssdp;
+    private readonly localAddress;
+    private readonly cacheGateway;
+    private upnpInfo;
+    url: string | null;
     constructor(options?: {
         timeout?: number;
+        url?: string;
+        localAddress?: string;
+        cacheGateway?: boolean;
     });
     createMapping(options: NewPortMappingOpts): Promise<RawResponse>;
     removeMapping(options: DeletePortMappingOpts): Promise<RawResponse>;
     getMappings(options?: GetMappingOpts): Promise<Mapping[]>;
     getPublicIp(): Promise<string>;
-    getGateway(): Promise<{
-        gateway: Device;
-        address: string;
-    }>;
+    getGateway(): Promise<upnpInfo>;
     close(): void;
 }
 export default Client;
@@ -51,15 +54,23 @@ export interface NewPortMappingOpts extends StandardOpts {
     description?: string;
     ttl?: number;
 }
-export declare type DeletePortMappingOpts = StandardOpts;
+export type DeletePortMappingOpts = StandardOpts;
 export interface GetMappingOpts {
     local?: boolean;
     description?: RegExp | string;
+}
+export interface upnpInfo {
+    gateway: Device;
+    localAddress: string;
 }
 /**
  * Main client interface.
  */
 export interface IClient {
+    /**
+     * Allows bypass of SSDP in situations with multicast issues
+    */
+    url: string | null;
     /**
      * Create a new port mapping
      * @param options Options for the new port mapping
@@ -82,10 +93,7 @@ export interface IClient {
     /**
      * Get the gateway device for communication
      */
-    getGateway(): Promise<{
-        gateway: Device;
-        address: string;
-    }>;
+    getGateway(): Promise<upnpInfo>;
     /**
      * Close the underlaying sockets and resources
      */

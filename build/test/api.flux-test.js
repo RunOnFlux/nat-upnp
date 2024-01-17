@@ -15,6 +15,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const net_1 = __importDefault(require("net"));
 const index_flux_test_1 = require("./index.flux-test");
 const src_1 = require("../src");
+const node_child_process_1 = require("node:child_process");
 (0, index_flux_test_1.setupTest)("NAT-UPNP/Client", (opts) => {
     let client;
     var globalPort = [0, 0, 0, 0, 0];
@@ -38,6 +39,15 @@ const src_1 = require("../src");
             }
         });
     }
+    function iptablesPresent() {
+        try {
+            (0, node_child_process_1.execSync)('iptables --version', { stdio: 'pipe' });
+        }
+        catch (_a) {
+            return false;
+        }
+        return true;
+    }
     opts.runBefore(() => {
         client = new src_1.Client();
     });
@@ -47,8 +57,17 @@ const src_1 = require("../src");
     opts.run("Get public ip address", () => __awaiter(void 0, void 0, void 0, function* () {
         const ip = yield client.getPublicIp();
         const gw = yield client.getGateway();
-        console.log("Public IP %s Gateway IP %s", ip, gw.address);
+        console.log("Public IP %s Gateway IP %s", ip, gw.localAddress);
         return net_1.default.isIP(ip) !== 0;
+    }));
+    opts.run("Cache gateway and run without SSDP", () => __awaiter(void 0, void 0, void 0, function* () {
+        const upnpInfo = yield client.getGateway();
+        console.log(`Gateway URL is: ${upnpInfo.gateway.description}`);
+        console.log(`Gatway address is ${upnpInfo.localAddress}`);
+        const nonSsdpClient = new src_1.Client(upnpInfo);
+        const nonSsdpupnpInfo = yield nonSsdpClient.getGateway();
+        console.log(`Non Ssdp Gateway address is ${nonSsdpupnpInfo.localAddress}`);
+        return nonSsdpupnpInfo.localAddress === upnpInfo.localAddress;
     }));
     opts.run("Display Existing Port Mappings", () => __awaiter(void 0, void 0, void 0, function* () {
         const mappings = yield getMapping();
@@ -84,6 +103,37 @@ const src_1 = require("../src");
         }
         return passed;
     }));
+    if (iptablesPresent()) {
+        opts.run("Verify no SSDP client and gateway caching", () => __awaiter(void 0, void 0, void 0, function* () {
+            const clientDefault = new src_1.Client();
+            const clientCaching = new src_1.Client({ cacheGateway: true });
+            const upnpInfo = yield clientDefault.getGateway();
+            const clientNoSsdp = new src_1.Client({ url: upnpInfo.gateway.description, localAddress: upnpInfo.localAddress });
+            console.log(upnpInfo);
+            const defaultMappings = yield clientDefault.getMappings();
+            console.log("\nDefault client mappings:", defaultMappings);
+            console.log("\nPopulating cache for caching client...");
+            yield clientCaching.getGateway();
+            console.log("\nBlocking SSDP via iptables...");
+            (0, node_child_process_1.execSync)('iptables -A OUTPUT -p udp --dport 1900 -j DROP');
+            const mappings1 = yield clientCaching.getMappings();
+            console.log("\nCaching client mappings:", mappings1);
+            const mappings2 = yield clientNoSsdp.getMappings();
+            console.log("\nNo SSDP client mappings:", mappings2);
+            let mappings3 = null;
+            try {
+                mappings3 = yield clientDefault.getMappings();
+            }
+            catch (err) {
+                if (err instanceof Error) {
+                    console.log("\nDefault client mappings: (caught err):", err.message);
+                }
+            }
+            console.log("\nUnblocking SSDP via iptables...\n");
+            (0, node_child_process_1.execSync)('iptables -D OUTPUT -p udp --dport 1900 -j DROP');
+            return JSON.stringify(defaultMappings) === JSON.stringify(mappings1) && JSON.stringify(defaultMappings) === JSON.stringify(mappings2) && mappings3 === null;
+        }));
+    }
     opts.run("Port unmapping", () => __awaiter(void 0, void 0, void 0, function* () {
         var i;
         for (i = 0; i < 5; i++) {

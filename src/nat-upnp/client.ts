@@ -3,17 +3,29 @@ import Device from "./device";
 import Ssdp from "./ssdp";
 
 export class Client implements IClient {
-  readonly timeout: number;
-  readonly ssdp = new Ssdp();
+  private readonly timeout: number;
+  private readonly ssdp = new Ssdp();
+  private readonly localAddress: string | null;
+  private readonly cacheGateway: boolean
+  private upnpInfo: upnpInfo | null = null;
 
-  constructor(options: { timeout?: number } = {}) {
+  url: string | null;
+
+  constructor(options: { timeout?: number, url?: string, localAddress?: string, cacheGateway?: boolean } = {}) {
+    if (options.url && !(options.localAddress)) {
+      throw new Error("`localAddress` must be supplied if using `url`");
+    }
+
     this.timeout = options.timeout || 1800;
+    this.url = options.url || null;
+    this.localAddress = options.localAddress || null;
+    this.cacheGateway = options.cacheGateway || false;
   }
 
   public async createMapping(
     options: NewPortMappingOpts
   ): Promise<RawResponse> {
-    return this.getGateway().then(({ gateway, address }) => {
+    return this.getGateway().then(({ gateway, localAddress }) => {
       const ports = normalizeOptions(options);
 
       if (typeof ports.remote.host === 'undefined') ports.remote.host = "";
@@ -26,7 +38,7 @@ export class Client implements IClient {
           options.protocol ? options.protocol.toUpperCase() : "TCP",
         ],
         ["NewInternalPort", ports.internal.port + ""],
-        ["NewInternalClient", ports.internal.host || address],
+        ["NewInternalClient", ports.internal.host || localAddress],
         ["NewEnabled", 1],
         ["NewPortMappingDescription", options.description || "node:nat:upnp"],
         ["NewLeaseDuration", options.ttl ?? 60 * 30],
@@ -54,7 +66,7 @@ export class Client implements IClient {
   }
 
   public async getMappings(options: GetMappingOpts = {}) {
-    const { gateway, address } = await this.getGateway();
+    const { gateway, localAddress } = await this.getGateway();
     let i = 0;
     let end = false;
     const results = [];
@@ -63,7 +75,7 @@ export class Client implements IClient {
       const data = (await gateway
         .run("GetGenericPortMappingEntry", [["NewPortMappingIndex", i++]])
         .catch((err) => {
-          if (i !== 1) {
+          if (i !== 1 || /ArrayIndexInvalid/.test(err?.response?.data)) {
             end = true;
           }
         }))!;
@@ -97,7 +109,7 @@ export class Client implements IClient {
         // temporary, so typescript will compile
         local: false,
       };
-      result.local = result.private.host === address;
+      result.local = result.private.host === localAddress;
 
       if (options.local && !result.local) {
         continue;
@@ -120,7 +132,7 @@ export class Client implements IClient {
   }
 
   public async getPublicIp(): Promise<string> {
-    return this.getGateway().then(async ({ gateway, address }) => {
+    return this.getGateway().then(async ({ gateway, localAddress }) => {
       const data = await gateway.run("GetExternalIPAddress", []);
 
       const key = Object.keys(data || {}).find((k) =>
@@ -132,25 +144,39 @@ export class Client implements IClient {
     });
   }
 
-  public async getGateway() {
+  public async getGateway(): Promise<upnpInfo> {
+    if (this.url) {
+      if (!this.upnpInfo) {
+        this.upnpInfo = { gateway: new Device(this.url), localAddress: this.localAddress! };
+      }
+      // resolve immediately without running SSDP.
+      return Promise.resolve(this.upnpInfo);
+    }
+
     let timeouted = false;
     const p = this.ssdp.search(
       "urn:schemas-upnp-org:device:InternetGatewayDevice:1"
     );
 
-    return new Promise<{ gateway: Device; address: string }>((s, r) => {
+    return new Promise<upnpInfo>((resolve, reject) => {
       const timeout = setTimeout(() => {
         timeouted = true;
         p.emit("end");
-        r(new Error("Connection timed out while searching for the gateway."));
+        // this will only happen after at least one call. (If cacheGateway is set below)
+        if (this.upnpInfo) {
+          resolve(this.upnpInfo);
+        }
+        reject(new Error("Connection timed out while searching for the gateway."));
       }, this.timeout);
-      p.on("device", (info, address) => {
+      p.on("device", (info, localAddress) => {
         if (timeouted) return;
         p.emit("end");
         clearTimeout(timeout);
-
-        // Create gateway
-        s({ gateway: new Device(info.location), address });
+        const upnpInfo = { gateway: new Device(info.location), localAddress }
+        if (this.cacheGateway) {
+          this.upnpInfo = upnpInfo;
+        }
+        resolve(upnpInfo);
       });
     });
   }
@@ -222,10 +248,19 @@ export interface GetMappingOpts {
   description?: RegExp | string;
 }
 
+export interface upnpInfo {
+  gateway: Device;
+  localAddress: string;
+}
+
 /**
  * Main client interface.
  */
 export interface IClient {
+  /**
+   * Allows bypass of SSDP in situations with multicast issues
+  */
+  url: string | null;
   /**
    * Create a new port mapping
    * @param options Options for the new port mapping
@@ -248,7 +283,7 @@ export interface IClient {
   /**
    * Get the gateway device for communication
    */
-  getGateway(): Promise<{ gateway: Device; address: string }>;
+  getGateway(): Promise<upnpInfo>;
   /**
    * Close the underlaying sockets and resources
    */

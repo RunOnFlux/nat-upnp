@@ -133,8 +133,18 @@ export class Ssdp implements ISsdp {
   }
 
   public close() {
-    this.sockets.forEach((socket) => socket.close());
-    this.closed = true;
+    // idempotent
+    if (!this.closed) {
+      try {
+        this.sockets.forEach((socket) => socket.close());
+      } catch {
+        // pass
+      }
+      this.sockets.length = 0;
+      this.closed = true;
+      this.bound = false;
+      this.boundCount = 0;
+    }
   }
 }
 

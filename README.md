@@ -100,7 +100,7 @@ await client.removeMapping({ public: 8080 });
 
 // Query specific port (O(1) — single SOAP call)
 const mapping = await client.getMapping({ public: 8080, protocol: "TCP" });
-// Returns Mapping or null if not found
+// Returns Mapping if found, null if not found (714/713), throws UpnpError on other errors
 
 // List all
 const all = await client.getMappings();
@@ -127,7 +127,11 @@ console.log(result.reservedPort);
 
 // Bulk operations
 await client.removeMappingRange({ startPort: 8000, endPort: 9000 });
-const range = await client.getMappingRange({ startPort: 8000, endPort: 9000 });
+const range = await client.getMappingRange({
+  startPort: 8000,
+  endPort: 9000,
+  numberOfPorts: 500,  // max entries to return (default: 1000)
+});
 ```
 
 ## SSDP Bypass
@@ -164,9 +168,12 @@ try {
 | 402 | Invalid Args |
 | 501 | Action Failed |
 | 606 | Action Not Authorized |
+| 713 | SpecifiedArrayIndexInvalid |
 | 714 | NoSuchEntryInArray |
 | 718 | ConflictInMappingEntry |
 | 725 | OnlyPermanentLeasesSupported |
+| 728 | NoPortMapsAvailable |
+| 729 | ConflictWithOtherMechanisms |
 
 `getMappings()` throws if a mid-iteration error occurs (e.g., network failure), so the caller knows they have incomplete data rather than silently receiving partial results. End-of-list signals (714, 713) are handled normally.
 
@@ -178,6 +185,8 @@ try {
 | `cacheGateway` | `boolean` | `false` | Cache gateway between calls |
 | `url` | `string` | — | Bypass SSDP, connect directly |
 | `localAddress` | `string` | — | Required when using `url` |
+
+Port mapping methods accept a `ttl` option (seconds). Default is 1800 (30 minutes). Set to 0 for permanent mappings.
 
 ## Resource Management
 

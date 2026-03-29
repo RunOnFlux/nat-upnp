@@ -130,12 +130,11 @@ export class Client implements IClient {
           ["NewPortMappingIndex", i],
         ]);
       } catch (err) {
-        // End-of-list: routers signal this with specific error codes
+        // End-of-list: routers signal this with specific error codes.
+        // This covers both "no mappings" (i=0) and "end of list" (i>0).
         if (err instanceof UpnpError && (err.code === 713 || err.code === 714)) break;
-        // First iteration with no results — empty list
-        if (i === 0) break;
-        // Mid-iteration error (network failure, timeout, etc.) — throw so the
-        // caller knows they have incomplete data, not an empty router
+        // Any other error (unsupported action, network failure, timeout) — throw
+        // so the caller knows something went wrong, not that the router is empty.
         throw err;
       }
 
@@ -349,11 +348,15 @@ export class Client implements IClient {
         p.emit("end");
         clearTimeout(timeout);
 
-        const upnpInfo = new UpnpInfo(new Device(headers.location));
-        if (this.cacheGateway) {
-          this.cachedInfo = upnpInfo;
+        try {
+          const upnpInfo = new UpnpInfo(new Device(headers.location));
+          if (this.cacheGateway) {
+            this.cachedInfo = upnpInfo;
+          }
+          resolve(upnpInfo);
+        } catch (err) {
+          reject(err instanceof Error ? err : new Error(String(err)));
         }
-        resolve(upnpInfo);
       });
     });
 

@@ -32,32 +32,55 @@ const mapping = await client.getMapping({ public: 8080, protocol: "TCP" });
 
 // Remove it
 await client.removeMapping({ public: 8080 });
-
-client.close();
 ```
 
 ## Gateway Discovery
 
-`getGateway()` discovers the UPnP gateway via SSDP and returns an `UpnpInfo` object. Device info and capabilities are fetched lazily on first access.
+`getGateway()` discovers the UPnP gateway via SSDP and returns an `UpnpInfo` object. The SSDP socket is created for discovery and automatically closed when done — no cleanup needed.
+
+Device info, capabilities, and local address are fetched lazily on first access, or all at once via `getAll()`:
 
 ```typescript
 const info = await client.getGateway();
 
-// Local address resolved via UDP connect (zero-packet kernel route query)
-const localAddr = await info.getLocalAddress();
+// Option A: resolve everything in one call
+const { device, capabilities, localAddress } = await info.getAll();
 
-// Device info from rootDesc.xml
+// Option B: fetch individually (lazy, cached after first call)
 const device = await info.getDevice();
-console.log(device?.manufacturer);
-console.log(device?.modelName);
-console.log(device?.wan?.modelDescription); // e.g. "MiniUPnP daemon version 2.3.9"
+const caps = await info.getCapabilities();
+const addr = await info.getLocalAddress();
+```
 
-// Service capabilities from SCPD
+### Device Info
+
+```typescript
+const device = await info.getDevice();
+console.log(device?.manufacturer);         // "FreeBSD"
+console.log(device?.modelName);            // "FreeBSD router"
+console.log(device?.modelNumber);          // "26.1.3"
+console.log(device?.wan?.modelDescription); // "MiniUPnP daemon version 2.3.9"
+```
+
+### Service Capabilities
+
+Parsed from the router's SCPD — tells you exactly which SOAP actions are supported:
+
+```typescript
 const caps = await info.getCapabilities();
 console.log(caps?.serviceType);                        // "urn:...:WANIPConnection:1"
+console.log(caps?.serviceVersion);                     // 1
 console.log(caps?.actions);                            // ["AddPortMapping", ...]
 console.log(caps?.supportsAddAnyPortMapping);          // false
 console.log(caps?.supportsGetSpecificPortMappingEntry); // true
+```
+
+### Local Address
+
+Resolved via UDP connect (zero-packet kernel route query) — the standard technique used by miniupnpc, Python, Go, Docker, and Kubernetes:
+
+```typescript
+const addr = await info.getLocalAddress(); // "192.168.1.100"
 ```
 
 ## Port Mapping
@@ -77,7 +100,7 @@ await client.removeMapping({ public: 8080 });
 
 // Query specific port (O(1) — single SOAP call)
 const mapping = await client.getMapping({ public: 8080, protocol: "TCP" });
-// Returns Mapping or null
+// Returns Mapping or null if not found
 
 // List all
 const all = await client.getMappings();
@@ -109,6 +132,8 @@ const range = await client.getMappingRange({ startPort: 8000, endPort: 9000 });
 
 ## SSDP Bypass
 
+If you already know the router's UPnP URL, skip SSDP discovery:
+
 ```typescript
 const client = new Client({
   url: "http://192.168.1.1:5000/rootDesc.xml",
@@ -117,6 +142,8 @@ const client = new Client({
 ```
 
 ## Error Handling
+
+SOAP errors are thrown as `UpnpError` with numeric codes:
 
 ```typescript
 import { UpnpError } from "@runonflux/nat-upnp";
@@ -141,6 +168,8 @@ try {
 | 718 | ConflictInMappingEntry |
 | 725 | OnlyPermanentLeasesSupported |
 
+`getMappings()` throws if a mid-iteration error occurs (e.g., network failure), so the caller knows they have incomplete data rather than silently receiving partial results. End-of-list signals (714, 713) are handled normally.
+
 ## Constructor Options
 
 | Option | Type | Default | Description |
@@ -150,13 +179,30 @@ try {
 | `url` | `string` | — | Bypass SSDP, connect directly |
 | `localAddress` | `string` | — | Required when using `url` |
 
+## Resource Management
+
+SSDP sockets are created per gateway discovery and closed automatically when discovery completes. No persistent sockets are held. `close()` is available to signal that the client should not be used further, but forgetting to call it does not leak resources.
+
+```typescript
+// Resources are managed automatically
+const client = new Client({ cacheGateway: true });
+const info = await client.getGateway(); // socket opened, used, closed
+await client.createMapping({ ... });     // uses HTTP, no persistent socket
+
+// Optional: signal no further use
+client.close();
+```
+
 ## Security
 
 - XXE protection (`processEntities: false`)
 - XML escaping on SOAP argument values
-- Response size limits (2MB)
+- Response size limits (2MB) and HTTP timeout (10s)
+- Redirect limit (2 hops)
 - `getMappings` iteration capped at 10,000
 - HTTP keepalive disabled (miniupnpd always closes connections)
+- SSDP Location header validated (HTTP only)
+- Device URL validated on construction
 
 ## License
 

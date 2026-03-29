@@ -4,7 +4,6 @@ UPnP port mapping client for Node.js with IGD v1/v2 support, SCPD capability det
 
 Tested against 13 router models across 400+ nodes (OPNsense, pfSense, ASUS, MikroTik, Ubiquiti, TP-Link, Freebox, Nokia, Sagemcom, NEC, Sercomm, Technicolor, Linux IGD).
 
-> This package is published as `@megachips/nat-upnp` for testing. The upstream package is [`@runonflux/nat-upnp`](https://github.com/RunOnFlux/nat-upnp).
 
 ## Installation
 

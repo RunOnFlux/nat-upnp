@@ -102,6 +102,7 @@ export class Client implements IClient {
     const localAddress = options.local ? await info.getLocalAddress() : "";
     const results: Mapping[] = [];
 
+    // Cap iteration to prevent infinite loops from malicious/broken routers
     const MAX_MAPPINGS = 10000;
     for (let i = 0; i < MAX_MAPPINGS; i++) {
       let data: RawResponse;
@@ -109,8 +110,14 @@ export class Client implements IClient {
         data = await info.gateway.run("GetGenericPortMappingEntry", [
           ["NewPortMappingIndex", i],
         ]);
-      } catch {
-        break;
+      } catch (err) {
+        // End-of-list: routers signal this with specific error codes
+        if (err instanceof UpnpError && (err.code === 713 || err.code === 714)) break;
+        // First iteration with no results — empty list
+        if (i === 0) break;
+        // Mid-iteration error (network failure, timeout, etc.) — throw so the
+        // caller knows they have incomplete data, not an empty router
+        throw err;
       }
 
       const res = findResponseKey(data, "GetGenericPortMappingEntryResponse");

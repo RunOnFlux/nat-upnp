@@ -1,6 +1,7 @@
 import axios from "axios";
 import dgram from "dgram";
 import http from "http";
+import net from "net";
 import { URL } from "url";
 import { XMLParser } from "fast-xml-parser";
 
@@ -23,23 +24,30 @@ const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 
 const axiosDefaults = {
   httpAgent: upnpAgent,
+  timeout: 10000,
   maxContentLength: MAX_RESPONSE_BYTES,
   maxBodyLength: MAX_RESPONSE_BYTES,
+  maxRedirects: 2,
 };
 
 export class Device implements IDevice {
   readonly description: string;
-  readonly services: string[];
+  readonly services: readonly string[];
 
-  // Lazy-init promises — concurrent callers share the same promise
-  private descriptionPromise: Promise<any> | null = null;
+  // Lazy-init promises — concurrent callers share the same promise.
+  // On error, the cache is cleared so subsequent calls retry.
+  private descriptionPromise: Promise<Record<string, unknown>> | null = null;
   private servicePromise: Promise<ResolvedService> | null = null;
   private deviceInfoPromise: Promise<GatewayDevice | null> | null = null;
   private capabilitiesPromise: Promise<ServiceCapabilities | null> | null = null;
   private localAddressPromise: Promise<string> | null = null;
 
   constructor(url: string) {
+    if (!url.startsWith("http")) {
+      throw new Error(`Invalid UPnP device URL: ${url}`);
+    }
     this.description = url;
+    // Preference order: v2 first, then v1, then PPP
     this.services = [
       "urn:schemas-upnp-org:service:WANIPConnection:2",
       "urn:schemas-upnp-org:service:WANIPConnection:1",
@@ -49,44 +57,61 @@ export class Device implements IDevice {
 
   /**
    * Fetch and parse the root device description XML.
-   * Concurrent calls share one promise.
+   * Concurrent calls share one promise. Clears cache on error to allow retry.
    */
-  private fetchDescription(): Promise<any> {
+  private fetchDescription(): Promise<Record<string, unknown>> {
     if (!this.descriptionPromise) {
       this.descriptionPromise = axios
         .get(this.description, axiosDefaults)
-        .then(({ data }) => xmlParser.parse(data));
+        .then(({ data }) => xmlParser.parse(data) as Record<string, unknown>)
+        .catch((err) => {
+          this.descriptionPromise = null;
+          throw err;
+        });
     }
     return this.descriptionPromise;
   }
 
   /**
    * Determine the local interface address used to reach this device.
-   * Uses UDP connect (zero-packet kernel route query) — the standard technique
-   * used by miniupnpc, Python, Go, Docker, and Kubernetes.
-   * Cached after first call.
+   * Uses UDP connect — a zero-packet kernel route query. The standard technique
+   * used by miniupnpc (C), Python, Go, Docker, and Kubernetes.
+   * No data is sent on the wire. Cached after first success; cleared on failure.
    */
   public getLocalAddress(): Promise<string> {
     if (!this.localAddressPromise) {
-      const routerIp = new URL(this.description).hostname;
-      this.localAddressPromise = resolveLocalAddress(routerIp);
+      const hostname = new URL(this.description).hostname;
+      if (!hostname || !net.isIPv4(hostname)) {
+        // If hostname is IPv6 or a DNS name, fall back to resolving via the description
+        // URL host directly. For IPv6, we'd need a udp6 socket.
+        this.localAddressPromise = Promise.resolve("");
+      } else {
+        this.localAddressPromise = resolveLocalAddress(hostname).catch(() => {
+          this.localAddressPromise = null;
+          return "";
+        });
+      }
     }
     return this.localAddressPromise;
   }
 
   /**
    * Parse device info from rootDesc.xml. Returns null on failure.
+   * Cached after first success; cleared on failure to allow retry.
    */
   public getDeviceInfo(): Promise<GatewayDevice | null> {
     if (!this.deviceInfoPromise) {
-      this.deviceInfoPromise = this.buildDeviceInfo().catch(() => null);
+      this.deviceInfoPromise = this.buildDeviceInfo().catch((err) => {
+        this.deviceInfoPromise = null;
+        return null;
+      });
     }
     return this.deviceInfoPromise;
   }
 
   private async buildDeviceInfo(): Promise<GatewayDevice> {
     const parsed = await this.fetchDescription();
-    const root = parsed?.root || {};
+    const root = (parsed as any)?.root || {};
     const device = root.device || {};
     const { devices } = this.parseDescription({ device });
 
@@ -128,10 +153,14 @@ export class Device implements IDevice {
 
   /**
    * Fetch and parse the SCPD to discover supported actions. Returns null on failure.
+   * Cached after first success; cleared on failure to allow retry.
    */
   public getCapabilities(): Promise<ServiceCapabilities | null> {
     if (!this.capabilitiesPromise) {
-      this.capabilitiesPromise = this.buildCapabilities().catch(() => null);
+      this.capabilitiesPromise = this.buildCapabilities().catch(() => {
+        this.capabilitiesPromise = null;
+        return null;
+      });
     }
     return this.capabilitiesPromise;
   }
@@ -139,15 +168,16 @@ export class Device implements IDevice {
   private async buildCapabilities(): Promise<ServiceCapabilities | null> {
     const service = await this.resolveService();
 
-    let parsed: any;
+    let parsed: Record<string, unknown>;
     try {
       const { data } = await axios.get(service.SCPDURL, axiosDefaults);
-      parsed = xmlParser.parse(data);
+      parsed = xmlParser.parse(data) as Record<string, unknown>;
     } catch {
       return null;
     }
 
-    const actionList = parsed?.scpd?.actionList?.action;
+    const scpd = parsed as any;
+    const actionList = scpd?.scpd?.actionList?.action;
     const actions: string[] = [];
     if (Array.isArray(actionList)) {
       for (const a of actionList) {
@@ -176,18 +206,26 @@ export class Device implements IDevice {
 
   /**
    * Resolve the service control URL. Prefers v2 > v1 > PPP.
+   * Cached after first success; cleared on failure to allow retry.
    */
   private resolveService(): Promise<ResolvedService> {
     if (!this.servicePromise) {
-      this.servicePromise = this.buildResolvedService();
+      this.servicePromise = this.buildResolvedService().catch((err) => {
+        this.servicePromise = null;
+        throw err;
+      });
     }
     return this.servicePromise;
   }
 
   private async buildResolvedService(): Promise<ResolvedService> {
     const parsed = await this.fetchDescription();
-    const root = parsed?.root;
-    if (!root) throw new Error("Invalid device description: no root element");
+    const root = (parsed as any)?.root;
+    if (!root) {
+      throw new Error(
+        `Invalid device description from ${this.description}: no root element`
+      );
+    }
 
     const allServices = this.parseDescription(root).services;
 
@@ -199,10 +237,12 @@ export class Device implements IDevice {
 
     if (!matched?.controlURL || !matched?.SCPDURL) {
       const available = allServices.map((s) => s.serviceType).join(", ");
-      throw new Error(`UPnP service not found. Available: ${available || "none"}`);
+      throw new Error(
+        `UPnP service not found on ${this.description}. Available: ${available || "none"}`
+      );
     }
 
-    const baseUrl = new URL(root.baseURL || "", this.description);
+    const baseUrl = new URL(root.baseURL ?? "", this.description);
     const prefix = (url: string) =>
       new URL(url, baseUrl.toString()).toString();
 
@@ -211,10 +251,6 @@ export class Device implements IDevice {
       SCPDURL: prefix(matched.SCPDURL),
       controlURL: prefix(matched.controlURL),
     };
-  }
-
-  public async getService(types: string[]): Promise<ResolvedService> {
-    return this.resolveService();
   }
 
   public async run(
@@ -250,23 +286,27 @@ export class Device implements IDevice {
         },
       });
       responseData = response.data;
-    } catch (err: any) {
-      if (err?.response?.data) {
+    } catch (err: unknown) {
+      if (isAxiosErrorWithData(err)) {
         throwIfSoapFault(err.response.data, action);
       }
       throw err;
     }
 
-    let parsed: any;
+    let parsed: Record<string, unknown>;
     try {
-      parsed = xmlParser.parse(responseData);
+      parsed = xmlParser.parse(responseData) as Record<string, unknown>;
     } catch {
-      throw new Error(`Malformed XML response for ${action}`);
+      throw new Error(
+        `Malformed XML in ${action} response from ${info.controlURL}`
+      );
     }
 
-    const soapBody = parsed?.Envelope?.Body;
+    const soapBody = (parsed as any)?.Envelope?.Body;
     if (!soapBody) {
-      throw new Error(`Malformed SOAP envelope for ${action}`);
+      throw new Error(
+        `Malformed SOAP envelope in ${action} response from ${info.controlURL}`
+      );
     }
 
     if (soapBody.Fault) {
@@ -320,9 +360,9 @@ export default Device;
 
 /**
  * Determine which local interface address the OS would use to reach a remote IP.
- * Uses UDP connect — a zero-packet kernel route query. The standard technique used
- * by miniupnpc, Python, Go, Docker, and Kubernetes.
- * No data is sent on the wire.
+ * Uses UDP connect — a zero-packet kernel route query. No data is sent on the wire.
+ * This is the standard technique used by miniupnpc (C), Python's socket module,
+ * Go's net.Dial, Docker, and Kubernetes for local address resolution.
  */
 function resolveLocalAddress(remoteIp: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -339,6 +379,15 @@ function resolveLocalAddress(remoteIp: string): Promise<string> {
   });
 }
 
+function isAxiosErrorWithData(err: unknown): err is { response: { data: string } } {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "response" in err &&
+    typeof (err as any).response?.data === "string"
+  );
+}
+
 const XML_ESCAPE_MAP: Record<string, string> = {
   "&": "&amp;",
   "<": "&lt;",
@@ -347,31 +396,37 @@ const XML_ESCAPE_MAP: Record<string, string> = {
   "'": "&apos;",
 };
 
+/** Escape XML special characters in SOAP argument values to prevent injection. */
 function escapeXml(str: string): string {
   return str.replace(/[&<>"']/g, (ch) => XML_ESCAPE_MAP[ch]);
 }
 
-function extractFaultInfo(fault: any): { code: number; description: string } {
-  const rawCode = fault?.detail?.UPnPError?.errorCode;
-  const rawDesc = fault?.detail?.UPnPError?.errorDescription;
+function extractFaultInfo(fault: Record<string, unknown>): { code: number; description: string } {
+  const detail = fault?.detail as Record<string, unknown> | undefined;
+  const upnpError = detail?.UPnPError as Record<string, unknown> | undefined;
+  const rawCode = upnpError?.errorCode;
+  const rawDesc = upnpError?.errorDescription;
   return {
     code: rawCode ? Number(rawCode) || 0 : 0,
-    description: rawDesc ? String(rawDesc) : String(fault?.faultstring || "Unknown UPnP error"),
+    description: rawDesc
+      ? String(rawDesc)
+      : String((fault as any)?.faultstring || "Unknown UPnP error"),
   };
 }
 
-function throwSoapFault(fault: any, action: string): never {
+function throwSoapFault(fault: Record<string, unknown>, action: string): never {
   const { code, description } = extractFaultInfo(fault);
   throw new UpnpError(code, description, action);
 }
 
 function throwIfSoapFault(data: string, action: string): void {
   try {
-    const parsed = xmlParser.parse(data);
+    const parsed = xmlParser.parse(data) as any;
     const fault = parsed?.Envelope?.Body?.Fault;
     if (fault) throwSoapFault(fault, action);
   } catch (err) {
     if (err instanceof UpnpError) throw err;
+    // XML parsing failed — not a SOAP fault, let caller handle original error
   }
 }
 
@@ -381,6 +436,19 @@ function throwIfSoapFault(data: string, action: string): void {
  * ==================
  */
 
+/**
+ * Structured UPnP error with numeric error code.
+ *
+ * Common error codes:
+ * - 402: Invalid Args
+ * - 501: Action Failed
+ * - 606: Action Not Authorized
+ * - 714: NoSuchEntryInArray
+ * - 718: ConflictInMappingEntry
+ * - 725: OnlyPermanentLeasesSupported
+ * - 728: NoPortMapsAvailable
+ * - 729: ConflictWithOtherMechanisms
+ */
 export class UpnpError extends Error {
   readonly code: number;
   readonly description: string;
@@ -402,44 +470,44 @@ export class UpnpError extends Error {
  */
 
 export interface GatewayDevice {
-  friendlyName: string;
-  manufacturer: string;
-  manufacturerURL: string;
-  modelDescription: string;
-  modelName: string;
-  modelNumber: string;
-  modelURL: string;
-  serialNumber: string;
-  UDN: string;
-  presentationURL: string;
-  specVersion: { major: number; minor: number };
-  configId: string | null;
-  descriptionURL: string;
+  readonly friendlyName: string;
+  readonly manufacturer: string;
+  readonly manufacturerURL: string;
+  readonly modelDescription: string;
+  readonly modelName: string;
+  readonly modelNumber: string;
+  readonly modelURL: string;
+  readonly serialNumber: string;
+  readonly UDN: string;
+  readonly presentationURL: string;
+  readonly specVersion: { readonly major: number; readonly minor: number };
+  readonly configId: string | null;
+  readonly descriptionURL: string;
   wan?: {
-    manufacturer: string;
-    modelDescription: string;
-    modelName: string;
-    modelNumber: string;
+    readonly manufacturer: string;
+    readonly modelDescription: string;
+    readonly modelName: string;
+    readonly modelNumber: string;
   };
 }
 
 export interface ServiceCapabilities {
-  serviceType: string;
-  serviceVersion: number;
-  controlURL: string;
-  actions: string[];
+  readonly serviceType: string;
+  readonly serviceVersion: number;
+  readonly controlURL: string;
+  readonly actions: readonly string[];
 
-  supportsAddAnyPortMapping: boolean;
-  supportsDeletePortMappingRange: boolean;
-  supportsGetListOfPortMappings: boolean;
-  supportsGetSpecificPortMappingEntry: boolean;
-  supportsGetStatusInfo: boolean;
+  readonly supportsAddAnyPortMapping: boolean;
+  readonly supportsDeletePortMappingRange: boolean;
+  readonly supportsGetListOfPortMappings: boolean;
+  readonly supportsGetSpecificPortMappingEntry: boolean;
+  readonly supportsGetStatusInfo: boolean;
 }
 
 export interface ResolvedService {
-  service: string;
-  SCPDURL: string;
-  controlURL: string;
+  readonly service: string;
+  readonly SCPDURL: string;
+  readonly controlURL: string;
 }
 
 export interface RawService {
@@ -468,7 +536,6 @@ export interface RawDevice {
 }
 
 export interface IDevice {
-  getService(types: string[]): Promise<ResolvedService>;
   getDeviceInfo(): Promise<GatewayDevice | null>;
   getCapabilities(): Promise<ServiceCapabilities | null>;
   getLocalAddress(): Promise<string>;

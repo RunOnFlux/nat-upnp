@@ -25,14 +25,8 @@ export type {
 } from "./nat-upnp/client";
 
 /**
- * Raw SSDP/UPNP response body (parsed XML).
+ * Raw SOAP response body as parsed by fast-xml-parser.
+ * Keys are response element names (e.g., "GetStatusInfoResponse").
+ * Values are the parsed child elements. Attributes are prefixed with "@_".
  */
-export type RawResponse = Partial<
-  Record<
-    string,
-    {
-      "@": { "xmlns:u": string };
-      [key: string]: unknown;
-    }
-  >
->;
+export type RawResponse = Record<string, unknown>;

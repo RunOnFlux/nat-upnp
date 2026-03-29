@@ -3,7 +3,8 @@ import EventEmitter from "events";
 
 /**
  * SSDP discovery. Finds UPnP devices on the local network via multicast.
- * Emits device Location URLs — does not resolve local addresses (that's the caller's job).
+ * Uses a single UDP socket bound to 0.0.0.0 — the OS routes the multicast
+ * query via the default gateway interface.
  */
 export class Ssdp implements ISsdp {
   private readonly sourcePort: number;
@@ -20,11 +21,10 @@ export class Ssdp implements ISsdp {
     this.sourcePort = options?.sourcePort || 0;
   }
 
-  private ensureSocket(): Socket {
-    if (this.socket) return this.socket;
+  private ensureSocket(): void {
+    if (this.socket || this.closed) return;
 
     const socket = dgram.createSocket({ type: "udp4", reuseAddr: true });
-    this.socket = socket;
 
     socket.on("message", (message) => {
       if (this.closed) return;
@@ -32,6 +32,8 @@ export class Ssdp implements ISsdp {
     });
 
     socket.on("listening", () => {
+      // Only store after bind succeeds — prevents concurrent callers getting an unbound socket
+      this.socket = socket;
       this.bound = true;
       while (this.pendingSearches.length > 0) {
         const [device, emitter] = this.pendingSearches.shift()!;
@@ -41,12 +43,13 @@ export class Ssdp implements ISsdp {
 
     socket.once("error", () => {
       this.bound = false;
-      this.socket = null;
+      if (this.socket === socket) {
+        this.socket = null;
+      }
       try { socket.close(); } catch { /* already closed */ }
     });
 
     socket.bind(this.sourcePort);
-    return socket;
   }
 
   private parseResponse(response: string) {
@@ -54,6 +57,9 @@ export class Ssdp implements ISsdp {
 
     const headers = parseMimeHeader(response);
     if (!headers.st) return;
+
+    // Validate Location header — must be an HTTP URL
+    if (headers.location && !headers.location.startsWith("http")) return;
 
     this.ssdpEmitter.emit("device", headers);
   }
@@ -91,8 +97,8 @@ export class Ssdp implements ISsdp {
     this.ssdpEmitter.on("device", ondevice);
 
     emitter.once("end", () => {
-      ended = true;
       this.ssdpEmitter.removeListener("device", ondevice);
+      ended = true;
     });
 
     return emitter;

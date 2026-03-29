@@ -53,6 +53,7 @@ export class Client implements IClient {
   private readonly localAddress: string | null;
   private readonly cacheGateway: boolean;
   private cachedInfo: UpnpInfo | null = null;
+  private pendingGateway: Promise<UpnpInfo> | null = null;
 
   url: string | null;
 
@@ -270,6 +271,7 @@ export class Client implements IClient {
   }
 
   public async getGateway(): Promise<UpnpInfo> {
+    // Direct URL mode — bypass SSDP
     if (this.url) {
       if (!this.cachedInfo) {
         this.cachedInfo = new UpnpInfo(new Device(this.url), this.localAddress!);
@@ -277,14 +279,23 @@ export class Client implements IClient {
       return this.cachedInfo;
     }
 
+    // Return cached gateway
     if (this.cachedInfo) return this.cachedInfo;
 
+    // Return pending search to avoid duplicate SSDP queries from concurrent callers
+    if (this.pendingGateway) return this.pendingGateway;
+
+    this.pendingGateway = this.discoverGateway();
+    return this.pendingGateway;
+  }
+
+  private discoverGateway(): Promise<UpnpInfo> {
     let resolved = false;
     const p = this.ssdp.search(
       "urn:schemas-upnp-org:device:InternetGatewayDevice:1"
     );
 
-    return new Promise<UpnpInfo>((resolve, reject) => {
+    const promise = new Promise<UpnpInfo>((resolve, reject) => {
       const timeout = setTimeout(() => {
         p.emit("end");
         if (this.cachedInfo) {
@@ -310,6 +321,13 @@ export class Client implements IClient {
         resolve(upnpInfo);
       });
     });
+
+    // Clear pending on completion (success or failure)
+    promise.finally(() => {
+      this.pendingGateway = null;
+    });
+
+    return promise;
   }
 
   public close() {
@@ -395,19 +413,19 @@ export default Client;
  */
 
 export interface Mapping {
-  public: { host: string; port: number };
-  private: { host: string; port: number };
-  protocol: string;
-  enabled: boolean;
-  description: string;
-  ttl: number;
-  local: boolean;
+  readonly public: { readonly host: string; readonly port: number };
+  readonly private: { readonly host: string; readonly port: number };
+  readonly protocol: string;
+  readonly enabled: boolean;
+  readonly description: string;
+  readonly ttl: number;
+  readonly local: boolean;
 }
 
 export interface StatusInfo {
-  connectionStatus: string;
-  lastConnectionError: string;
-  uptime: number;
+  readonly connectionStatus: string;
+  readonly lastConnectionError: string;
+  readonly uptime: number;
 }
 
 export interface StandardOpts {

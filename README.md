@@ -1,74 +1,163 @@
-# NAT UPnP
+# nat-upnp
 
-Port mapping via UPnP APIs
+UPnP port mapping client for Node.js with IGD v1/v2 support, SCPD capability detection, and device info parsing.
+
+Tested against 13 router models across 400+ nodes (OPNsense, pfSense, ASUS, MikroTik, Ubiquiti, TP-Link, Freebox, Nokia, Sagemcom, NEC, Sercomm, Technicolor, Linux IGD).
+
+> This package is published as `@megachips/nat-upnp` for testing. The upstream package is [`@runonflux/nat-upnp`](https://github.com/RunOnFlux/nat-upnp).
 
 ## Installation
 
 ```bash
-npm i @runonflux/nat-upnp
+npm install @runonflux/nat-upnp
 ```
 
-## Usage
+## Quick Start
 
-```javascript
-// using ES modules
+```typescript
 import { Client } from "@runonflux/nat-upnp";
-const client = new Client();
 
-// using node require
-const natUpnp = require("@runonflux/nat-upnp");
-const client = new natUpnp.Client();
+const client = new Client({ cacheGateway: true });
 
-client
-  .createMapping({
-    public: 12345,
-    private: 54321,
-    ttl: 10,
-  })
-  .then(() => {
-    // Will be called once finished
-  })
-  .catch(() => {
-    // Will be called on error
-  });
-
-async () => {
-  await client.removeMapping({
-    public: 12345,
-  });
-};
-
-client.getMappings();
-
-client.getMappings({
-  local: true,
-  description: "both of these fields are optional",
+// Create a port mapping
+await client.createMapping({
+  public: 8080,
+  private: 8080,
+  description: "My App",
+  ttl: 3600,
 });
 
-client.getPublicIp();
+// Check if a specific mapping exists (O(1) lookup)
+const mapping = await client.getMapping({ public: 8080, protocol: "TCP" });
+
+// Remove it
+await client.removeMapping({ public: 8080 });
+
+client.close();
 ```
 
-### License
+## Gateway Discovery
 
-This software is licensed under the MIT License.
+`getGateway()` discovers the UPnP gateway via SSDP and returns an `UpnpInfo` object. Device info and capabilities are fetched lazily on first access.
 
-Copyright Fedor Indutny, 2012.
+```typescript
+const info = await client.getGateway();
 
-Permission is hereby granted, free of charge, to any person obtaining a
-copy of this software and associated documentation files (the
-"Software"), to deal in the Software without restriction, including
-without limitation the rights to use, copy, modify, merge, publish,
-distribute, sublicense, and/or sell copies of the Software, and to permit
-persons to whom the Software is furnished to do so, subject to the
-following conditions:
+// Local address resolved via UDP connect (zero-packet kernel route query)
+const localAddr = await info.getLocalAddress();
 
-The above copyright notice and this permission notice shall be included
-in all copies or substantial portions of the Software.
+// Device info from rootDesc.xml
+const device = await info.getDevice();
+console.log(device?.manufacturer);
+console.log(device?.modelName);
+console.log(device?.wan?.modelDescription); // e.g. "MiniUPnP daemon version 2.3.9"
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
-NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
-DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
-OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
-USE OR OTHER DEALINGS IN THE SOFTWARE.
+// Service capabilities from SCPD
+const caps = await info.getCapabilities();
+console.log(caps?.serviceType);                        // "urn:...:WANIPConnection:1"
+console.log(caps?.actions);                            // ["AddPortMapping", ...]
+console.log(caps?.supportsAddAnyPortMapping);          // false
+console.log(caps?.supportsGetSpecificPortMappingEntry); // true
+```
+
+## Port Mapping
+
+```typescript
+// Create
+await client.createMapping({
+  public: 8080,
+  private: 8080,        // defaults to public if omitted
+  protocol: "TCP",      // default
+  description: "My App",
+  ttl: 3600,            // seconds, 0 = permanent
+});
+
+// Remove
+await client.removeMapping({ public: 8080 });
+
+// Query specific port (O(1) — single SOAP call)
+const mapping = await client.getMapping({ public: 8080, protocol: "TCP" });
+// Returns Mapping or null
+
+// List all
+const all = await client.getMappings();
+const local = await client.getMappings({ local: true });
+const filtered = await client.getMappings({ description: /^Flux_/ });
+```
+
+## Network Info
+
+```typescript
+const ip = await client.getPublicIp();
+const status = await client.getStatusInfo();
+// { connectionStatus: "Connected", uptime: 86400, lastConnectionError: "ERROR_NONE" }
+```
+
+## IGD v2 Actions
+
+Available only if the router advertises them in its SCPD. Throws `UpnpError` (code 401) if not supported.
+
+```typescript
+// Router assigns port if requested one is taken
+const result = await client.createAnyMapping({ public: 8080, ttl: 3600 });
+console.log(result.reservedPort);
+
+// Bulk operations
+await client.removeMappingRange({ startPort: 8000, endPort: 9000 });
+const range = await client.getMappingRange({ startPort: 8000, endPort: 9000 });
+```
+
+## SSDP Bypass
+
+```typescript
+const client = new Client({
+  url: "http://192.168.1.1:5000/rootDesc.xml",
+  localAddress: "192.168.1.100",
+});
+```
+
+## Error Handling
+
+```typescript
+import { UpnpError } from "@runonflux/nat-upnp";
+
+try {
+  await client.createMapping({ public: 8080, ttl: 60 });
+} catch (err) {
+  if (err instanceof UpnpError) {
+    console.log(err.code);        // 725
+    console.log(err.description);  // "OnlyPermanentLeasesSupported"
+    console.log(err.action);       // "AddPortMapping"
+  }
+}
+```
+
+| Code | Description |
+|------|-------------|
+| 402 | Invalid Args |
+| 501 | Action Failed |
+| 606 | Action Not Authorized |
+| 714 | NoSuchEntryInArray |
+| 718 | ConflictInMappingEntry |
+| 725 | OnlyPermanentLeasesSupported |
+
+## Constructor Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `timeout` | `number` | `1800` | SSDP discovery timeout (ms) |
+| `cacheGateway` | `boolean` | `false` | Cache gateway between calls |
+| `url` | `string` | — | Bypass SSDP, connect directly |
+| `localAddress` | `string` | — | Required when using `url` |
+
+## Security
+
+- XXE protection (`processEntities: false`)
+- XML escaping on SOAP argument values
+- Response size limits (2MB)
+- `getMappings` iteration capped at 10,000
+- HTTP keepalive disabled (miniupnpd always closes connections)
+
+## License
+
+[Blue Oak Model License 1.0.0](https://blueoakcouncil.org/license/1.0.0)

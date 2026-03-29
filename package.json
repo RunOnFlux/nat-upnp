@@ -6,9 +6,9 @@
   "files": [
     "build/src"
   ],
-  "author": "Fedor Indutny <fedor@indutny.com>, SimplyLinn <https://github.com/SimplyLinn>, Kaden Sharpin <http://github.com/kaden-sharpin>, David White",
-  "homepage": "https://github.com/MorningLightMountain713/nat-upnp",
-  "license": "MIT",
+  "author": "RunOnFlux",
+  "homepage": "https://github.com/RunOnFlux/nat-upnp",
+  "license": "BlueOak-1.0.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/MorningLightMountain713/nat-upnp.git"

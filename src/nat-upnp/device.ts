@@ -323,8 +323,8 @@ export class Device implements IDevice {
     const services: RawService[] = [];
     const devices: RawDevice[] = [];
 
-    function traverseDevices(device?: RawDevice) {
-      if (!device || typeof device !== "object") return;
+    function traverseDevices(device?: RawDevice, depth = 0) {
+      if (!device || typeof device !== "object" || depth > 10) return;
 
       devices.push(device);
 
@@ -341,7 +341,7 @@ export class Device implements IDevice {
       const deviceList = device.deviceList?.device;
       if (deviceList) {
         const items = Array.isArray(deviceList) ? deviceList : [deviceList];
-        items.forEach(traverseDevices);
+        items.forEach((d) => traverseDevices(d, depth + 1));
       }
     }
 

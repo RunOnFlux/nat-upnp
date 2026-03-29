@@ -59,8 +59,8 @@ export class Ssdp implements ISsdp {
     const headers = parseMimeHeader(response);
     if (!headers.st) return;
 
-    // Validate Location header — must be an HTTP URL
-    if (headers.location && !headers.location.startsWith("http")) return;
+    // Require a valid HTTP Location header — reject missing, empty, or non-http
+    if (!headers.location || !headers.location.startsWith("http")) return;
 
     this.ssdpEmitter.emit("device", headers);
   }

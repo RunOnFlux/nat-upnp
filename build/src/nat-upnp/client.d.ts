@@ -1,24 +1,57 @@
 import { RawResponse } from "../index";
-import Device from "./device";
+import Device, { GatewayDevice, ServiceCapabilities } from "./device";
+/**
+ * Holds the resolved gateway and provides lazy access to device info,
+ * capabilities, and local address. All are fetched on first access and cached.
+ */
+export declare class UpnpInfo {
+    readonly gateway: Device;
+    private readonly localAddressOverride;
+    private devicePromise;
+    private capabilitiesPromise;
+    constructor(gateway: Device, localAddressOverride?: string);
+    /** Fetch and cache device info from rootDesc.xml. Returns null on failure. */
+    getDevice(): Promise<GatewayDevice | null>;
+    /** Fetch and cache service capabilities from SCPD. Returns null on failure. */
+    getCapabilities(): Promise<ServiceCapabilities | null>;
+    /**
+     * Get the local interface address used to reach the router.
+     * If a localAddress was provided at construction (SSDP bypass mode), returns that.
+     * Otherwise resolves via UDP connect (zero-packet kernel route query).
+     */
+    getLocalAddress(): Promise<string>;
+}
 export declare class Client implements IClient {
     private readonly timeout;
     private readonly ssdp;
     private readonly localAddress;
     private readonly cacheGateway;
-    private upnpInfo;
+    private cachedInfo;
     url: string | null;
-    constructor(options?: {
-        timeout?: number;
-        url?: string;
-        localAddress?: string;
-        cacheGateway?: boolean;
-    });
+    constructor(options?: ClientOptions);
     createMapping(options: NewPortMappingOpts): Promise<RawResponse>;
     removeMapping(options: DeletePortMappingOpts): Promise<RawResponse>;
     getMappings(options?: GetMappingOpts): Promise<Mapping[]>;
+    /**
+     * Query a specific port mapping by external port and protocol.
+     * O(1) lookup — single SOAP call, no iteration.
+     * Returns null if the mapping does not exist.
+     */
+    getMapping(options: GetSpecificMappingOpts): Promise<Mapping | null>;
+    getStatusInfo(): Promise<StatusInfo>;
     getPublicIp(): Promise<string>;
-    getGateway(): Promise<upnpInfo>;
+    /**
+     * Create a port mapping, allowing the router to assign a different external port
+     * if the requested one is taken. IGD v2 action.
+     */
+    createAnyMapping(options: NewPortMappingOpts): Promise<{
+        reservedPort: number;
+    }>;
+    removeMappingRange(options: DeleteMappingRangeOpts): Promise<RawResponse>;
+    getMappingRange(options: GetMappingRangeOpts): Promise<Mapping[]>;
+    getGateway(): Promise<UpnpInfo>;
     close(): void;
+    private requireCapability;
 }
 export default Client;
 export interface Mapping {
@@ -36,9 +69,11 @@ export interface Mapping {
     ttl: number;
     local: boolean;
 }
-/**
- * Standard options that many options use.
- */
+export interface StatusInfo {
+    connectionStatus: string;
+    lastConnectionError: string;
+    uptime: number;
+}
 export interface StandardOpts {
     public?: number | {
         port?: number;
@@ -59,43 +94,43 @@ export interface GetMappingOpts {
     local?: boolean;
     description?: RegExp | string;
 }
-export interface upnpInfo {
-    gateway: Device;
-    localAddress: string;
+export interface GetSpecificMappingOpts {
+    public: number;
+    protocol?: string;
+    remoteHost?: string;
 }
-/**
- * Main client interface.
- */
+export interface DeleteMappingRangeOpts {
+    startPort: number;
+    endPort: number;
+    protocol?: string;
+    manage?: boolean;
+}
+export interface GetMappingRangeOpts {
+    startPort: number;
+    endPort: number;
+    protocol?: string;
+    manage?: boolean;
+    numberOfPorts?: number;
+}
+export interface ClientOptions {
+    timeout?: number;
+    url?: string;
+    localAddress?: string;
+    cacheGateway?: boolean;
+}
 export interface IClient {
-    /**
-     * Allows bypass of SSDP in situations with multicast issues
-    */
     url: string | null;
-    /**
-     * Create a new port mapping
-     * @param options Options for the new port mapping
-     */
     createMapping(options: NewPortMappingOpts): Promise<RawResponse>;
-    /**
-     * Remove a port mapping
-     * @param options Specify which port mapping to remove
-     */
+    createAnyMapping(options: NewPortMappingOpts): Promise<{
+        reservedPort: number;
+    }>;
     removeMapping(options: DeletePortMappingOpts): Promise<RawResponse>;
-    /**
-     * Get a list of existing mappings
-     * @param options Filter mappings based on these options
-     */
+    removeMappingRange(options: DeleteMappingRangeOpts): Promise<RawResponse>;
     getMappings(options?: GetMappingOpts): Promise<Mapping[]>;
-    /**
-     * Fetch the external/public IP from the gateway
-     */
+    getMappingRange(options: GetMappingRangeOpts): Promise<Mapping[]>;
+    getMapping(options: GetSpecificMappingOpts): Promise<Mapping | null>;
+    getStatusInfo(): Promise<StatusInfo>;
     getPublicIp(): Promise<string>;
-    /**
-     * Get the gateway device for communication
-     */
-    getGateway(): Promise<upnpInfo>;
-    /**
-     * Close the underlaying sockets and resources
-     */
+    getGateway(): Promise<UpnpInfo>;
     close(): void;
 }

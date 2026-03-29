@@ -1,161 +1,126 @@
 import dgram, { Socket } from "dgram";
-import os from "os";
 import EventEmitter from "events";
 
+/**
+ * SSDP discovery. Finds UPnP devices on the local network via multicast.
+ * Emits device Location URLs — does not resolve local addresses (that's the caller's job).
+ */
 export class Ssdp implements ISsdp {
-  private sourcePort = this.options?.sourcePort || 0;
-  private bound = false;
-  private boundCount = 0;
-  private closed = false;
-
-  private readonly queue: [string, SsdpEmitter][] = [];
+  private readonly sourcePort: number;
   private readonly multicast = "239.255.255.250";
   private readonly port = 1900;
-  private readonly sockets;
   private readonly ssdpEmitter: SsdpEmitter = new EventEmitter();
 
-  constructor(private options?: { sourcePort?: number }) {
-    // Create sockets on all external interfaces
-    const interfaces = os.networkInterfaces();
-    this.sockets = Object.keys(interfaces).reduce<Socket[]>(
-      (arr, key) =>
-        arr.concat(
-          interfaces[key]
-            ?.filter((item) => !item.internal)
-            .map((item) => this.createSocket(item)) ?? []
-        ),
-      []
-    );
+  private socket: Socket | null = null;
+  private bound = false;
+  private closed = false;
+  private readonly pendingSearches: [string, SsdpEmitter][] = [];
+
+  constructor(options?: { sourcePort?: number }) {
+    this.sourcePort = options?.sourcePort || 0;
   }
 
-  private createSocket(iface: any) {
-    const socket = dgram.createSocket(
-      iface.family === "IPv4" ? "udp4" : "udp6"
-    );
+  private ensureSocket(): Socket {
+    if (this.socket) return this.socket;
+
+    const socket = dgram.createSocket({ type: "udp4", reuseAddr: true });
+    this.socket = socket;
 
     socket.on("message", (message) => {
-      // Ignore messages after closing sockets
       if (this.closed) return;
-
-      // Parse response
-      this.parseResponse(message.toString(), socket.address as any as string);
+      this.parseResponse(message.toString("utf-8"));
     });
 
-    // Bind in next tick (sockets should be me in this.sockets array)
-    process.nextTick(() => {
-      // Unqueue this._queue once all sockets are ready
-      const onready = () => {
-        if (this.boundCount < this.sockets.length) return;
-
-        this.bound = true;
-        this.queue.forEach(([device, emitter]) => this.search(device, emitter));
-      };
-
-      socket.on("listening", () => {
-        this.boundCount += 1;
-        onready();
-      });
-
-      // On error - remove socket from list and execute items from queue
-      socket.once("error", () => {
-        socket.close();
-        this.sockets.splice(this.sockets.indexOf(socket), 1);
-        onready();
-      });
-
-      socket.address = iface.address;
-      socket.bind(this.sourcePort, iface.address);
+    socket.on("listening", () => {
+      this.bound = true;
+      while (this.pendingSearches.length > 0) {
+        const [device, emitter] = this.pendingSearches.shift()!;
+        this.search(device, emitter);
+      }
     });
 
+    socket.once("error", () => {
+      this.bound = false;
+      this.socket = null;
+      try { socket.close(); } catch { /* already closed */ }
+    });
+
+    socket.bind(this.sourcePort);
     return socket;
   }
 
-  private parseResponse(response: string, addr: string) {
-    // Ignore incorrect packets
+  private parseResponse(response: string) {
     if (!/^(HTTP|NOTIFY)/m.test(response)) return;
 
     const headers = parseMimeHeader(response);
-
-    // We are only interested in messages that can be matched against the original
-    // search target
     if (!headers.st) return;
 
-    this.ssdpEmitter.emit("device", headers, addr);
+    this.ssdpEmitter.emit("device", headers);
   }
 
   public search(device: string, emitter?: SsdpEmitter): SsdpEmitter {
     if (!emitter) {
-      emitter = new EventEmitter();
-      emitter._ended = false;
-      emitter.once("end", () => {
-        emitter!._ended = true;
-      });
+      emitter = new EventEmitter() as SsdpEmitter;
     }
 
+    this.ensureSocket();
+
     if (!this.bound) {
-      this.queue.push([device, emitter]);
+      this.pendingSearches.push([device, emitter]);
       return emitter;
     }
 
     const query = Buffer.from(
       "M-SEARCH * HTTP/1.1\r\n" +
-        "HOST: " +
-        this.multicast +
-        ":" +
-        this.port +
-        "\r\n" +
+        "HOST: " + this.multicast + ":" + this.port + "\r\n" +
         'MAN: "ssdp:discover"\r\n' +
         "MX: 1\r\n" +
-        "ST: " +
-        device +
-        "\r\n" +
+        "ST: " + device + "\r\n" +
         "\r\n"
     );
 
-    // Send query on each socket
-    this.sockets.forEach((socket) =>
-      socket.send(query, 0, query.length, this.port, this.multicast)
-    );
+    this.socket!.send(query, 0, query.length, this.port, this.multicast);
 
-    const ondevice: SearchCallback = (headers, address) => {
-      if (!emitter || emitter._ended || headers.st !== device) return;
+    let ended = false;
 
-      emitter.emit("device", headers, address);
+    const ondevice: SearchCallback = (headers) => {
+      if (ended || headers.st !== device) return;
+      emitter!.emit("device", headers);
     };
+
     this.ssdpEmitter.on("device", ondevice);
 
-    // Detach listener after receiving 'end' event
-    emitter.once("end", () =>
-      this.ssdpEmitter.removeListener("device", ondevice)
-    );
+    emitter.once("end", () => {
+      ended = true;
+      this.ssdpEmitter.removeListener("device", ondevice);
+    });
 
     return emitter;
   }
 
   public close() {
-    // idempotent
-    if (!this.closed) {
+    if (this.closed) return;
+    this.closed = true;
+    this.bound = false;
+    this.pendingSearches.length = 0;
+    this.ssdpEmitter.removeAllListeners();
+
+    if (this.socket) {
       try {
-        this.sockets.forEach((socket) => socket.close());
-      } catch {
-        // pass
-      }
-      this.sockets.length = 0;
-      this.closed = true;
-      this.bound = false;
-      this.boundCount = 0;
+        this.socket.removeAllListeners();
+        this.socket.close();
+      } catch { /* already closed */ }
+      this.socket = null;
     }
   }
 }
 
 function parseMimeHeader(headerStr: string) {
-  const lines = headerStr.split(/\r\n/g);
-
-  // Parse headers from lines to hashmap
+  const lines = headerStr.split(/\r?\n/);
   return lines.reduce<Record<string, string>>((headers, line) => {
-    const [_, key, value] = line.match(/^([^:]*)\s*:\s*(.*)$/) ?? [];
-    if (key && value) {
-      headers[key.toLowerCase()] = value;
+    const match = line.match(/^([^:]+)\s*:\s*(.*)$/);
+    if (match) {
+      headers[match[1].toLowerCase()] = match[2].trimEnd();
     }
     return headers;
   }, {});
@@ -169,7 +134,7 @@ export default Ssdp;
  * ===================
  */
 
-type SearchArgs = [Record<string, string>, string];
+type SearchArgs = [Record<string, string>];
 export type SearchCallback = (...args: SearchArgs) => void;
 type SearchEvent = <E extends Events>(
   ev: E,
@@ -184,22 +149,10 @@ export interface SsdpEmitter extends EventEmitter {
   addListener: EventListener<this>;
   once: EventListener<this>;
   on: EventListener<this>;
-
   emit: SearchEvent;
-
-  _ended?: boolean;
 }
 
 export interface ISsdp {
-  /**
-   * Search for a SSDP compatible server on the network
-   * @param device Search Type (ST) header, specifying which device to search for
-   * @param emitter An existing EventEmitter to emit event on
-   * @returns The event emitter provided in Promise, or a newly instantiated one.
-   */
   search(device: string, emitter?: SsdpEmitter): SsdpEmitter;
-  /**
-   * Close all sockets
-   */
   close(): void;
 }

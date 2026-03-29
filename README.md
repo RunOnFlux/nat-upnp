@@ -14,9 +14,17 @@ npm install @runonflux/nat-upnp
 
 ## Quick Start
 
-```typescript
+ESM:
+```javascript
 import { Client } from "@runonflux/nat-upnp";
+```
 
+CommonJS:
+```javascript
+const { Client } = require("@runonflux/nat-upnp");
+```
+
+```javascript
 const client = new Client({ cacheGateway: true });
 
 // Create a port mapping

@@ -36,11 +36,6 @@ export class Ssdp implements ISsdp {
       this.socket = socket;
       this.bound = true;
 
-      // unref() so this socket doesn't prevent the Node process from exiting
-      // if the caller forgets to call close(). The socket stays functional but
-      // won't keep the event loop alive on its own.
-      socket.unref();
-
       while (this.pendingSearches.length > 0) {
         const [device, emitter] = this.pendingSearches.shift()!;
         this.search(device, emitter);

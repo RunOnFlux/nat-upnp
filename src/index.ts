@@ -17,6 +17,7 @@ export type {
   GetSpecificMappingOpts,
   Mapping,
   StatusInfo,
+  ResolvedGatewayInfo,
   DeletePortMappingOpts,
   DeleteMappingRangeOpts,
   NewPortMappingOpts,

@@ -45,11 +45,30 @@ export class UpnpInfo {
     }
     return this.gateway.getLocalAddress();
   }
+
+  /**
+   * Convenience method: resolve all gateway info in one call.
+   * Fetches device info, capabilities, and local address in parallel.
+   * For callers who don't need lazy loading.
+   */
+  async getAll(): Promise<ResolvedGatewayInfo> {
+    const [device, capabilities, localAddress] = await Promise.all([
+      this.getDevice(),
+      this.getCapabilities(),
+      this.getLocalAddress(),
+    ]);
+    return { device, capabilities, localAddress };
+  }
+}
+
+export interface ResolvedGatewayInfo {
+  readonly device: GatewayDevice | null;
+  readonly capabilities: ServiceCapabilities | null;
+  readonly localAddress: string;
 }
 
 export class Client implements IClient {
   private readonly timeout: number;
-  private readonly ssdp = new Ssdp();
   private readonly localAddress: string | null;
   private readonly cacheGateway: boolean;
   private cachedInfo: UpnpInfo | null = null;
@@ -302,8 +321,12 @@ export class Client implements IClient {
   }
 
   private discoverGateway(): Promise<UpnpInfo> {
+    // Create a fresh SSDP instance per discovery. It's closed automatically
+    // when discovery completes — no socket left open, no leaks.
+    const ssdp = new Ssdp();
     let resolved = false;
-    const p = this.ssdp.search(
+
+    const p = ssdp.search(
       "urn:schemas-upnp-org:device:InternetGatewayDevice:1"
     );
 
@@ -334,8 +357,9 @@ export class Client implements IClient {
       });
     });
 
-    // Clear pending on completion (success or failure)
+    // Clean up SSDP socket after discovery (success or failure) — no leaks
     promise.finally(() => {
+      ssdp.close();
       this.pendingGateway = null;
     });
 
@@ -344,7 +368,6 @@ export class Client implements IClient {
 
   public close() {
     this.closed = true;
-    this.ssdp.close();
   }
 
   private async requireCapability(

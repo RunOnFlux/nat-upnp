@@ -367,12 +367,29 @@ export default Device;
 function resolveLocalAddress(remoteIp: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const socket = dgram.createSocket("udp4");
+    let settled = false;
+
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        try { socket.close(); } catch { /* already closed */ }
+        reject(new Error(`resolveLocalAddress timed out for ${remoteIp}`));
+      }
+    }, 5000);
+
     socket.connect(80, remoteIp, () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       const address = socket.address().address;
       socket.close();
       resolve(address);
     });
+
     socket.on("error", (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       try { socket.close(); } catch { /* already closed */ }
       reject(err);
     });

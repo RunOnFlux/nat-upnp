@@ -54,6 +54,7 @@ export class Client implements IClient {
   private readonly cacheGateway: boolean;
   private cachedInfo: UpnpInfo | null = null;
   private pendingGateway: Promise<UpnpInfo> | null = null;
+  private closed = false;
 
   url: string | null;
 
@@ -271,6 +272,10 @@ export class Client implements IClient {
   }
 
   public async getGateway(): Promise<UpnpInfo> {
+    if (this.closed) {
+      throw new Error("Client is closed");
+    }
+
     // Direct URL mode — bypass SSDP
     if (this.url) {
       if (!this.cachedInfo) {
@@ -331,6 +336,7 @@ export class Client implements IClient {
   }
 
   public close() {
+    this.closed = true;
     this.ssdp.close();
   }
 

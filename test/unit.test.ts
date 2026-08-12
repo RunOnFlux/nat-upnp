@@ -5,8 +5,15 @@ import axiosModule from "axios";
 import { UpnpError } from "../src/nat-upnp/device";
 import { Device } from "../src/nat-upnp/device";
 import { Client } from "../src/nat-upnp/client";
-import { parseMimeHeader } from "../src/nat-upnp/ssdp";
-import { installFakeRouter, DESCRIPTION_URL, UNMAPPED_PORT } from "./fake-router";
+import { parseMimeHeader, Ssdp, type SsdpEmitter } from "../src/nat-upnp/ssdp";
+import { installFakeDgram, FakeSocket, ssdpResponse, settle } from "./fake-dgram";
+import {
+  installFakeRouter,
+  requests,
+  DESCRIPTION_URL,
+  UNMAPPED_PORT,
+  type Breakage,
+} from "./fake-router";
 
 // Fixtures are in test/fixtures/ (source), not build/test/fixtures/
 const fixturesDir = join(__dirname, "..", "..", "test", "fixtures");
@@ -968,6 +975,9 @@ function getSoapFaultCode(xml: string): number | null {
     });
   }
 
+  // Only these four advertise the IGD v2 actions in their SCPD.
+  const v2Routers = new Set(["nokia-igd-v2", "sagemcom-livebox", "sercomm-gpon", "technicolor"]);
+
   for (const router of routers) {
     await test(`${router}: getCapabilities reads the action list from SCPD`, async () => {
       const caps = await withRouter(router, async (c) => {
@@ -980,26 +990,287 @@ function getSoapFaultCode(xml: string): number | null {
         caps!.actions.includes("AddPortMapping"),
         `${router}: AddPortMapping should be advertised`
       );
+      // Every flag is asserted against the advertised list, so a flag wired to
+      // the wrong action name fails here rather than passing quietly.
       assertEqual(
         caps!.supportsGetSpecificPortMappingEntry,
         caps!.actions.includes("GetSpecificPortMappingEntry"),
-        `${router}: capability flag should track the action list`
+        `${router}: GetSpecificPortMappingEntry flag`
+      );
+      assertEqual(
+        caps!.supportsGetStatusInfo,
+        caps!.actions.includes("GetStatusInfo"),
+        `${router}: GetStatusInfo flag`
+      );
+      assertEqual(
+        caps!.supportsAddAnyPortMapping,
+        caps!.actions.includes("AddAnyPortMapping"),
+        `${router}: AddAnyPortMapping flag`
+      );
+      assertEqual(
+        caps!.supportsDeletePortMappingRange,
+        caps!.actions.includes("DeletePortMappingRange"),
+        `${router}: DeletePortMappingRange flag`
+      );
+      assertEqual(
+        caps!.supportsGetListOfPortMappings,
+        caps!.actions.includes("GetListOfPortMappings"),
+        `${router}: GetListOfPortMappings flag`
+      );
+      assertEqual(
+        caps!.supportsAddAnyPortMapping,
+        v2Routers.has(router),
+        `${router}: only the v2 routers advertise AddAnyPortMapping`
+      );
+      assertEqual(caps!.serviceType, caps!.serviceType, `${router}: serviceType present`);
+      assertEqual(
+        caps!.serviceVersion,
+        Number(caps!.serviceType.slice(-1)),
+        `${router}: version is read off the service type`
       );
     });
   }
 
+  await test("mikrotik: relative URLs resolve against URLBase, not the description URL", async () => {
+    // MikroTik is the only fixture carrying a URLBase, and it points at a
+    // different host and port than the description was fetched from.
+    const caps = await withRouter("mikrotik", async (c) => {
+      const info = await c.getGateway();
+      return info.getCapabilities();
+    });
+    assert(caps !== null, "expected capabilities");
+    assert(
+      caps!.controlURL.startsWith("http://192.168.0.1:2828"),
+      `controlURL should resolve against URLBase, got ${caps!.controlURL}`
+    );
+  });
+
   for (const router of routers) {
-    await test(`${router}: getDevice reports the manufacturer and model`, async () => {
-      const expected = expectedDevices[router];
+    await test(`${router}: getMappings honours the description filter`, async () => {
+      const expected = expectedGenericEntry[router];
+      if (router === "mikrotik") return; // walk ends on 402, covered separately
+      const matched = await withRouter(router, (c) =>
+        c.getMappings({ description: expected.description })
+      );
+      assertEqual(matched.length, 1, `${router}: exact description should match`);
+      const missed = await withRouter(router, (c) =>
+        c.getMappings({ description: "no-such-description-anywhere" })
+      );
+      assertEqual(missed.length, 0, `${router}: unmatched description should filter everything`);
+    });
+  }
+
+  await test("getMappings honours the local filter", async () => {
+    // opnsense is the one capture whose entry points somewhere other than our
+    // local address, so a local-only listing must come back empty.
+    const all = await withRouter("opnsense", (c) => c.getMappings());
+    const localOnly = await withRouter("opnsense", (c) => c.getMappings({ local: true }));
+    assertEqual(all.length, 1, "unfiltered listing");
+    assertEqual(localOnly.length, 0, "the captured entry is not on our local address");
+  });
+
+  await test("getMapping lower-cases the protocol it reports back", async () => {
+    const mapping = await withRouter("opnsense", (c) =>
+      c.getMapping({ public: 16132, protocol: "udp" })
+    );
+    assert(mapping !== null, "expected a mapping");
+    assertEqual(mapping!.protocol, "udp", "protocol is normalised to lower case");
+  });
+
+  // Expectations read out of each rootdesc fixture, not out of the parser, so
+  // these assert what the document says rather than what the code happens to do.
+  const expectedDeviceInfo: Record<
+    string,
+    {
+      friendlyName: string;
+      manufacturer: string;
+      modelName: string;
+      modelNumber: string;
+      modelDescription: string;
+      specVersion: { major: number; minor: number };
+    }
+  > = {
+    // friendlyName arrives still escaped: the parser runs with
+    // processEntities: false for XXE protection, which also leaves the five
+    // predefined character entities undecoded. Any router with & < > " ' in a
+    // text field reads back escaped.
+    opnsense: { friendlyName: "OPNsense UPnP IGD &amp; PCP", manufacturer: "FreeBSD", modelName: "FreeBSD router", modelNumber: "26.1.3", modelDescription: "FreeBSD with MiniUPnPd version 2.3.9 router", specVersion: { major: 1, minor: 1 } },
+    "pfsense-2.7": { friendlyName: "FreeBSD router", manufacturer: "FreeBSD", modelName: "FreeBSD router", modelNumber: "2.7.2-RELEASE", modelDescription: "FreeBSD router", specVersion: { major: 1, minor: 1 } },
+    "pfsense-2.8": { friendlyName: "FreeBSD router", manufacturer: "FreeBSD", modelName: "FreeBSD router", modelNumber: "2.8.1-RELEASE", modelDescription: "FreeBSD with MiniUPnPd version 2.3.7 router", specVersion: { major: 1, minor: 1 } },
+    "asus-rt-ax55": { friendlyName: "RT-AX55-0001", manufacturer: "ASUSTeK Computer Inc.", modelName: "ASUS Wireless Router", modelNumber: "RT-AX55", modelDescription: "ASUS Wireless Router", specVersion: { major: 1, minor: 1 } },
+    "nec-sh621a1": { friendlyName: "SH621A1", manufacturer: "NEC Corporation/NEC Platforms, Ltd.", modelName: "SH621A1", modelNumber: "", modelDescription: "Broadband Router and Wireless Access Point", specVersion: { major: 1, minor: 0 } },
+    "sagemcom-livebox": { friendlyName: "Orange Livebox", manufacturer: "Sagemcom", modelName: "Residential Livebox (GPON, WAN Ethernet)", modelNumber: "5", modelDescription: "Sagemcom,fr,SGFI-fr-G06.R05.C05_20", specVersion: { major: 1, minor: 0 } },
+    "sagemcom-f5685": { friendlyName: "Sagemcom F5685LGB", manufacturer: "Sagemcom", modelName: "F5685LGB", modelNumber: "F5685LGB", modelDescription: "F@ST 5685 LG, Mercury v3", specVersion: { major: 1, minor: 0 } },
+    "nokia-igd-v2": { friendlyName: "Internet Home Gateway Device", manufacturer: "Nokia", modelName: "IGD Version 2.00", modelNumber: "2", modelDescription: "Optical-fiber Broadband Router", specVersion: { major: 1, minor: 0 } },
+    mikrotik: { friendlyName: "MikroTik Router", manufacturer: "MikroTik", modelName: "Router OS", modelNumber: "", modelDescription: "", specVersion: { major: 1, minor: 0 } },
+    freebox: { friendlyName: "Freebox Server", manufacturer: "Freebox", modelName: "Freebox Server", modelNumber: "6", modelDescription: "NAS/Modem/Routeur ADSL/FTTH", specVersion: { major: 1, minor: 0 } },
+    "linux-igd": { friendlyName: "Linux Internet Gateway Device", manufacturer: "Linux UPnP IGD Project", modelName: "IGD Version 1.00", modelNumber: "", modelDescription: "", specVersion: { major: 1, minor: 0 } },
+    "sercomm-gpon": { friendlyName: "SERCOMM", manufacturer: "Sercomm", modelName: "FG824CD", modelNumber: "FG824CD", modelDescription: "G-PON ONT/ONU", specVersion: { major: 1, minor: 0 } },
+    technicolor: { friendlyName: "MediaAccess FGA2130FWB (0000TEST1)", manufacturer: "Technicolor", modelName: "MediaAccess FG", modelNumber: "Technicolor FGA2130FWB", modelDescription: "Technicolor Internet Gateway Device", specVersion: { major: 1, minor: 0 } },
+  };
+
+  for (const router of routers) {
+    await test(`${router}: getDevice reports every field the description carries`, async () => {
+      const expected = expectedDeviceInfo[router];
       const device = await withRouter(router, async (c) => {
         const info = await c.getGateway();
         return info.getDevice();
       });
       assert(device !== null, `${router}: expected device info`);
+      assertEqual(device!.friendlyName, expected.friendlyName, `${router}: friendlyName`);
       assertEqual(device!.manufacturer, expected.manufacturer, `${router}: manufacturer`);
       assertEqual(device!.modelName, expected.modelName, `${router}: modelName`);
+      assertEqual(device!.modelNumber, expected.modelNumber, `${router}: modelNumber`);
+      assertEqual(
+        device!.modelDescription,
+        expected.modelDescription,
+        `${router}: modelDescription`
+      );
+      assertEqual(device!.specVersion.major, expected.specVersion.major, `${router}: spec major`);
+      assertEqual(device!.specVersion.minor, expected.specVersion.minor, `${router}: spec minor`);
+      assertEqual(device!.descriptionURL, DESCRIPTION_URL, `${router}: descriptionURL`);
     });
   }
+
+  // ========================================
+  // The request the client builds
+  // ========================================
+  console.log("\n=== Outgoing SOAP requests ===\n");
+
+  await test("createMapping sends every argument the action requires", async () => {
+    await withRouter("opnsense", (c) =>
+      c.createMapping({ public: 8080, private: 9090, protocol: "udp", ttl: 0 })
+    );
+    const add = requests.find((r) => r.action === "AddPortMapping");
+    assert(!!add, "expected an AddPortMapping request");
+    for (const [tag, value] of [
+      ["NewExternalPort", "8080"],
+      ["NewInternalPort", "9090"],
+      ["NewProtocol", "UDP"],
+      ["NewInternalClient", LOCAL_ADDRESS],
+      ["NewEnabled", "1"],
+      ["NewLeaseDuration", "0"],
+    ] as const) {
+      assert(
+        add!.body.includes(`<${tag}>${value}</${tag}>`),
+        `${tag} should be ${value} — got ${add!.body}`
+      );
+    }
+    assertEqual(
+      add!.headers["SOAPAction"],
+      JSON.stringify("urn:schemas-upnp-org:service:WANIPConnection:1#AddPortMapping"),
+      "SOAPAction header"
+    );
+  });
+
+  await test("createMapping defaults the description and lease when not given", async () => {
+    await withRouter("opnsense", (c) => c.createMapping({ public: 8080, private: 9090 }));
+    const add = requests.find((r) => r.action === "AddPortMapping");
+    assert(!!add, "expected an AddPortMapping request");
+    assert(add!.body.includes("<NewProtocol>TCP</NewProtocol>"), "protocol defaults to TCP");
+    assert(
+      add!.body.includes("<NewPortMappingDescription>node:nat:upnp</NewPortMappingDescription>"),
+      "description default"
+    );
+    assert(add!.body.includes("<NewLeaseDuration>1800</NewLeaseDuration>"), "lease default");
+  });
+
+  await test("createMapping escapes XML metacharacters in the description", async () => {
+    await withRouter("opnsense", (c) =>
+      c.createMapping({ public: 8080, private: 9090, ttl: 0, description: 'a & b <c> "d"' })
+    );
+    const add = requests.find((r) => r.action === "AddPortMapping");
+    assert(!!add, "expected an AddPortMapping request");
+    // An unescaped & or < would produce a body the router cannot parse.
+    assert(!/<NewPortMappingDescription>[^<]*[&][^a-z#]/.test(add!.body), "raw & in description");
+    assert(
+      add!.body.includes("&amp;") && add!.body.includes("&lt;"),
+      `metacharacters should be escaped — got ${add!.body}`
+    );
+  });
+
+  await test("removeMapping sends only the three keys that identify a mapping", async () => {
+    await withRouter("opnsense", (c) => c.removeMapping({ public: 8080, protocol: "tcp" }));
+    const del = requests.find((r) => r.action === "DeletePortMapping");
+    assert(!!del, "expected a DeletePortMapping request");
+    assert(del!.body.includes("<NewExternalPort>8080</NewExternalPort>"), "external port");
+    assert(del!.body.includes("<NewProtocol>TCP</NewProtocol>"), "protocol upper-cased");
+    assert(!del!.body.includes("NewInternalPort"), "internal port is not part of a delete");
+  });
+
+  // ========================================
+  // Failures a captured response cannot express
+  // ========================================
+  console.log("\n=== Transport and malformed responses ===\n");
+
+  async function withBroken<T>(breakage: Breakage, fn: (c: Client) => Promise<T>): Promise<T> {
+    const restore = installFakeRouter("opnsense", breakage);
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+    try {
+      return await fn(client);
+    } finally {
+      client.close();
+      restore();
+    }
+  }
+
+  async function expectThrow(fn: () => Promise<unknown>, what: string): Promise<unknown> {
+    try {
+      await fn();
+    } catch (err) {
+      return err;
+    }
+    throw new Error(`${what}: expected a throw, but the call resolved`);
+  }
+
+  await test("a dead socket propagates instead of being reported as an empty result", async () => {
+    const err = await expectThrow(
+      () => withBroken("transport", (c) => c.getMappings()),
+      "getMappings on a dead socket"
+    );
+    assertEqual((err as Error).message, "socket hang up");
+  });
+
+  await test("garbage XML fails loudly rather than becoming an empty result", async () => {
+    const err = await expectThrow(
+      () => withBroken("malformed", (c) => c.getStatusInfo()),
+      "getStatusInfo on garbage XML"
+    );
+    const message = (err as Error).message;
+    assert(/GetStatusInfo/.test(message), `error should name the action, got: ${message}`);
+    // Note it does NOT arrive as the "Malformed XML" error device.ts raises:
+    // fast-xml-parser accepts unclosed tags, mismatched tags, bare text and the
+    // empty string without throwing, so that branch is unreachable as configured
+    // and garbage instead surfaces as a missing response body.
+    assert(!/malformed/i.test(message), "the malformed-XML branch is currently unreachable");
+  });
+
+  await test("an HTTP error with no fault body still surfaces as an error", async () => {
+    const err = await expectThrow(
+      () => withBroken("empty-500", (c) => c.getStatusInfo()),
+      "getStatusInfo on a bare 502"
+    );
+    // There is no UPnPError to unwrap, so it must not be reported as a UPnP fault.
+    assert(!(err instanceof UpnpError), "a 502 with no fault body is not a UPnP error");
+  });
+
+  await test("a thrown non-Error is still propagated", async () => {
+    const err = await expectThrow(
+      () => withBroken("non-error", (c) => c.getStatusInfo()),
+      "getStatusInfo on a thrown string"
+    );
+    assert(err !== undefined, "expected the thrown value to reach the caller");
+  });
+
+  await test("getMappings does not treat a transport failure as end-of-list", async () => {
+    // 713/714 end the walk; anything else must not, or a broken router would
+    // look like a router with no mappings.
+    const err = await expectThrow(
+      () => withBroken("empty-500", (c) => c.getMappings()),
+      "getMappings on a bare 502"
+    );
+    assert(err !== undefined, "expected the failure to propagate");
+  });
 
   await test("Client surfaces a transport failure rather than swallowing it", async () => {
     const restore = installFakeRouter("opnsense");
@@ -1020,6 +1291,219 @@ function getSoapFaultCode(xml: string): number | null {
     } finally {
       client.close();
       restore();
+    }
+  });
+
+  // ========================================
+  // SSDP discovery over a fake UDP socket
+  // ========================================
+  console.log("\n=== SSDP discovery ===\n");
+
+  const IGD = "urn:schemas-upnp-org:device:InternetGatewayDevice:1";
+
+  async function withSsdp<T>(fn: (ssdp: Ssdp, sockets: FakeSocket[]) => Promise<T>): Promise<T> {
+    const fake = installFakeDgram();
+    const ssdp = new Ssdp();
+    try {
+      return await fn(ssdp, fake.sockets);
+    } finally {
+      ssdp.close();
+      fake.restore();
+    }
+  }
+
+  function once(emitter: SsdpEmitter, event: "device", ms = 50): Promise<any | null> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(null), ms);
+      emitter.once(event, ((payload: any) => {
+        clearTimeout(timer);
+        resolve(payload);
+      }) as any);
+    });
+  }
+
+  await test("search sends a conformant M-SEARCH to the multicast group", async () => {
+    await withSsdp(async (ssdp, sockets) => {
+      ssdp.search(IGD);
+      await settle();
+      assertEqual(sockets.length, 1, "one socket is created");
+      assertEqual(sockets[0].sent.length, 1, "one datagram is sent");
+      const { query, port, address } = sockets[0].sent[0];
+      assertEqual(port, 1900, "SSDP port");
+      assertEqual(address, "239.255.255.250", "multicast group");
+      assert(query.startsWith("M-SEARCH * HTTP/1.1\r\n"), "request line");
+      assert(query.includes(`ST: ${IGD}\r\n`), "search target");
+      assert(query.includes('MAN: "ssdp:discover"\r\n'), "MAN header");
+      assert(/MX: \d+\r\n/.test(query), "MX header");
+      assert(query.includes("HOST: 239.255.255.250:1900\r\n"), "HOST header");
+      assert(query.endsWith("\r\n\r\n"), "blank line terminates the request");
+    });
+  });
+
+  await test("a matching response is reported as a device", async () => {
+    await withSsdp(async (ssdp, sockets) => {
+      const emitter = ssdp.search(IGD);
+      await settle();
+      // The listener has to be attached first: delivery emits synchronously.
+      const pending = once(emitter, "device");
+      sockets[0].deliver(ssdpResponse(IGD));
+      const headers = await pending;
+      assert(headers !== null, "expected a device event");
+      assertEqual(headers.location, "http://192.0.2.1:5000/rootDesc.xml", "location");
+      assertEqual(headers.st, IGD, "search target echoed back");
+    });
+  });
+
+  await test("a response for a different search target is ignored", async () => {
+    await withSsdp(async (ssdp, sockets) => {
+      const emitter = ssdp.search(IGD);
+      await settle();
+      sockets[0].deliver(ssdpResponse("urn:schemas-upnp-org:device:MediaServer:1"));
+      assertEqual(await once(emitter, "device"), null, "should not match another target");
+    });
+  });
+
+  await test("a response without a Location header is rejected", async () => {
+    await withSsdp(async (ssdp, sockets) => {
+      const emitter = ssdp.search(IGD);
+      await settle();
+      sockets[0].deliver(`HTTP/1.1 200 OK\r\nST: ${IGD}\r\n\r\n`);
+      assertEqual(await once(emitter, "device"), null, "no location means no device");
+    });
+  });
+
+  await test("a Location that is not http is rejected", async () => {
+    await withSsdp(async (ssdp, sockets) => {
+      const emitter = ssdp.search(IGD);
+      await settle();
+      // Guards against a hostile responder pointing the client at a file or a
+      // scheme the fetch would treat very differently.
+      sockets[0].deliver(ssdpResponse(IGD, "file:///etc/passwd"));
+      assertEqual(await once(emitter, "device"), null, "non-http location is refused");
+    });
+  });
+
+  await test("traffic that is not an SSDP response is ignored", async () => {
+    await withSsdp(async (ssdp, sockets) => {
+      const emitter = ssdp.search(IGD);
+      await settle();
+      sockets[0].deliver("GARBAGE\r\nST: whatever\r\nLOCATION: http://192.0.2.1/\r\n\r\n");
+      assertEqual(await once(emitter, "device"), null, "only HTTP/NOTIFY is parsed");
+    });
+  });
+
+  await test("a NOTIFY advertisement is accepted as well as a search reply", async () => {
+    await withSsdp(async (ssdp, sockets) => {
+      const emitter = ssdp.search(IGD);
+      await settle();
+      const pending = once(emitter, "device");
+      sockets[0].deliver(
+        `NOTIFY * HTTP/1.1\r\nST: ${IGD}\r\nLOCATION: http://192.0.2.1:5000/rootDesc.xml\r\n\r\n`
+      );
+      assert((await pending) !== null, "NOTIFY should be parsed too");
+    });
+  });
+
+  await test("searches issued before the bind completes are flushed afterwards", async () => {
+    await withSsdp(async (ssdp, sockets) => {
+      // Two searches back to back: the first triggers the bind, the second
+      // arrives while it is still in flight and must be queued, not dropped.
+      ssdp.search(IGD);
+      ssdp.search("urn:schemas-upnp-org:device:MediaServer:1");
+      await settle();
+      // Anchor on the line start: "HOST:" also ends in "ST:".
+      const sentTargets = sockets
+        .flatMap((s) => s.sent)
+        .map((d) => /\r\nST: (.*)\r\n/.exec(d.query)?.[1]);
+      assert(sentTargets.includes(IGD), "the first search is sent");
+      assert(
+        sentTargets.includes("urn:schemas-upnp-org:device:MediaServer:1"),
+        "the queued search is sent too"
+      );
+    });
+  });
+
+  await test("concurrent searches before bind open a second socket that close never releases", async () => {
+    // ensureSocket only stores the socket once the bind lands, so a second
+    // search arriving in that window creates another one. The later bind then
+    // overwrites the stored reference, and close releases that one -- leaving
+    // the socket actually carrying the traffic open. This pins the behaviour as
+    // it stands; it is a leak, not a design.
+    const fake = installFakeDgram();
+    const ssdp = new Ssdp();
+    try {
+      ssdp.search(IGD);
+      ssdp.search("urn:schemas-upnp-org:device:MediaServer:1");
+      await settle();
+      assertEqual(fake.sockets.length, 2, "a second socket is created");
+      assertEqual(fake.sockets[0].sent.length, 2, "the first socket carries both searches");
+      assertEqual(fake.sockets[1].sent.length, 0, "the second socket carries nothing");
+      ssdp.close();
+      assertEqual(fake.sockets[1].closed, true, "close releases the stored socket");
+      assertEqual(fake.sockets[0].closed, false, "but the working socket is left open");
+    } finally {
+      fake.restore();
+    }
+  });
+
+  await test("a bind failure leaves no socket behind", async () => {
+    const fake = installFakeDgram();
+    FakeSocket.failNextBind = true;
+    const ssdp = new Ssdp();
+    try {
+      ssdp.search(IGD);
+      await settle();
+      assertEqual(fake.sockets.length, 1, "a socket was attempted");
+      assertEqual(fake.sockets[0].sent.length, 0, "nothing is sent when the bind fails");
+      assertEqual(fake.sockets[0].closed, true, "the failed socket is closed");
+    } finally {
+      ssdp.close();
+      fake.restore();
+    }
+  });
+
+  await test("close stops delivery and releases the socket", async () => {
+    const fake = installFakeDgram();
+    const ssdp = new Ssdp();
+    try {
+      const emitter = ssdp.search(IGD);
+      await settle();
+      const socket = fake.sockets[0];
+      ssdp.close();
+      assertEqual(socket.closed, true, "socket is closed");
+      socket.deliver(ssdpResponse(IGD));
+      assertEqual(await once(emitter, "device"), null, "no delivery after close");
+    } finally {
+      fake.restore();
+    }
+  });
+
+  await test("close is idempotent and searching afterwards opens nothing", async () => {
+    const fake = installFakeDgram();
+    const ssdp = new Ssdp();
+    try {
+      ssdp.search(IGD);
+      await settle();
+      ssdp.close();
+      ssdp.close();
+      ssdp.search(IGD);
+      await settle();
+      assertEqual(fake.sockets.length, 1, "no socket is created after close");
+    } finally {
+      fake.restore();
+    }
+  });
+
+  await test("a custom source port is used for the bind", async () => {
+    const fake = installFakeDgram();
+    const ssdp = new Ssdp({ sourcePort: 1901 });
+    try {
+      ssdp.search(IGD);
+      await settle();
+      assertEqual(fake.sockets[0].boundTo, 1901, "bind uses the requested source port");
+    } finally {
+      ssdp.close();
+      fake.restore();
     }
   });
 

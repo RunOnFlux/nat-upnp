@@ -48,13 +48,27 @@ function fixtureFor(router: string, action: string, body: string): string {
   }
 }
 
+/** Ways a router can fail that a captured response cannot express. */
+export type Breakage =
+  | "transport" // socket died mid-request
+  | "malformed" // 200 carrying XML that will not parse
+  | "empty-500" // HTTP error with no SOAP fault body to unwrap
+  | "non-error"; // something thrown that is not an Error at all
+
+/** Every SOAP request the client built during the active install. */
+export const requests: { action: string; body: string; headers: Record<string, string> }[] = [];
+
 /**
  * Serve one router's captured responses in place of the network, so the real
  * client and device code runs end to end. Returns a function that restores axios.
+ *
+ * `breakage` replaces the SOAP response with a failure a fixture cannot
+ * represent, which is the only way into the retry and fault-unwrapping paths.
  */
-export function installFakeRouter(router: string): () => void {
+export function installFakeRouter(router: string, breakage?: Breakage): () => void {
   const realGet = axios.get;
   const realPost = axios.post;
+  requests.length = 0;
 
   (axios as any).get = async (url: string) => ({
     data:
@@ -66,6 +80,19 @@ export function installFakeRouter(router: string): () => void {
   (axios as any).post = async (_url: string, body: string, config: any) => {
     const soapAction = String(JSON.parse(config.headers.SOAPAction));
     const action = soapAction.slice(soapAction.indexOf("#") + 1);
+    requests.push({ action, body, headers: config.headers });
+
+    switch (breakage) {
+      case "transport":
+        throw new Error("socket hang up");
+      case "malformed":
+        return { data: "<s:Envelope><s:Body><unclosed>" };
+      case "empty-500":
+        throw { response: { data: "<html>502 Bad Gateway</html>", status: 502 } };
+      case "non-error":
+        throw "router said no";
+    }
+
     const xml = loadFixture(fixtureFor(router, action, body));
     // A fault arrives as an HTTP error carrying the fault body, the shape the
     // device code unwraps to recover the UPnP error code.

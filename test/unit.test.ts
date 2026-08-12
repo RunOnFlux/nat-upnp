@@ -1,8 +1,12 @@
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { XMLParser } from "fast-xml-parser";
+import axiosModule from "axios";
 import { UpnpError } from "../src/nat-upnp/device";
 import { Device } from "../src/nat-upnp/device";
+import { Client } from "../src/nat-upnp/client";
+import { parseMimeHeader } from "../src/nat-upnp/ssdp";
+import { installFakeRouter, DESCRIPTION_URL, UNMAPPED_PORT } from "./fake-router";
 
 // Fixtures are in test/fixtures/ (source), not build/test/fixtures/
 const fixturesDir = join(__dirname, "..", "..", "test", "fixtures");
@@ -650,51 +654,37 @@ function getSoapFaultCode(xml: string): number | null {
   // ========================================
   console.log("\n=== SSDP Header Parsing ===\n");
 
-  // We can't import the private function, so test via the SSDP's public behavior
-  // But we can test the regex pattern directly
-
   await test("MIME header parsing: standard CRLF", () => {
-    const input = "HTTP/1.1 200 OK\r\nST: urn:test:1\r\nLocation: http://1.2.3.4/\r\n\r\n";
-    const lines = input.split(/\r?\n/);
-    const headers: Record<string, string> = {};
-    for (const line of lines) {
-      const match = line.match(/^([^:]+)\s*:\s*(.*)$/);
-      if (match) headers[match[1].toLowerCase()] = match[2].trimEnd();
-    }
+    const headers = parseMimeHeader(
+      "HTTP/1.1 200 OK\r\nST: urn:test:1\r\nLocation: http://1.2.3.4/\r\n\r\n"
+    );
     assertEqual(headers["st"], "urn:test:1");
     assertEqual(headers["location"], "http://1.2.3.4/");
   });
 
   await test("MIME header parsing: LF-only line endings", () => {
-    const input = "HTTP/1.1 200 OK\nST: urn:test:1\nLocation: http://1.2.3.4/\n\n";
-    const lines = input.split(/\r?\n/);
-    const headers: Record<string, string> = {};
-    for (const line of lines) {
-      const match = line.match(/^([^:]+)\s*:\s*(.*)$/);
-      if (match) headers[match[1].toLowerCase()] = match[2].trimEnd();
-    }
+    const headers = parseMimeHeader(
+      "HTTP/1.1 200 OK\nST: urn:test:1\nLocation: http://1.2.3.4/\n\n"
+    );
     assertEqual(headers["st"], "urn:test:1");
+    assertEqual(headers["location"], "http://1.2.3.4/");
   });
 
   await test("MIME header parsing: empty value", () => {
-    const input = "HTTP/1.1 200 OK\r\nST:\r\n\r\n";
-    const lines = input.split(/\r?\n/);
-    const headers: Record<string, string> = {};
-    for (const line of lines) {
-      const match = line.match(/^([^:]+)\s*:\s*(.*)$/);
-      if (match) headers[match[1].toLowerCase()] = match[2].trimEnd();
-    }
+    const headers = parseMimeHeader("HTTP/1.1 200 OK\r\nST:\r\n\r\n");
     assertEqual(headers["st"], "");
   });
 
+  await test("MIME header parsing: field names are lowercased", () => {
+    const headers = parseMimeHeader("HTTP/1.1 200 OK\r\nLOCATION: http://1.2.3.4/\r\n\r\n");
+    assertEqual(headers["location"], "http://1.2.3.4/");
+    assertEqual(headers["LOCATION"], undefined);
+  });
+
   await test("MIME header parsing: value with colons", () => {
-    const input = "HTTP/1.1 200 OK\r\nLocation: http://192.168.1.1:8080/desc.xml\r\n\r\n";
-    const lines = input.split(/\r?\n/);
-    const headers: Record<string, string> = {};
-    for (const line of lines) {
-      const match = line.match(/^([^:]+)\s*:\s*(.*)$/);
-      if (match) headers[match[1].toLowerCase()] = match[2].trimEnd();
-    }
+    const headers = parseMimeHeader(
+      "HTTP/1.1 200 OK\r\nLocation: http://192.168.1.1:8080/desc.xml\r\n\r\n"
+    );
     // Should capture full URL including port
     assertEqual(headers["location"], "http://192.168.1.1:8080/desc.xml");
   });
@@ -723,25 +713,313 @@ function getSoapFaultCode(xml: string): number | null {
     const key = Object.keys(body).find((k) => k.startsWith("GetGenericPortMappingEntryResponse"));
     assert(!!key, "Key not found");
     const res = body[key!];
-    // Verify all expected fields exist
-    assert(res.NewExternalPort !== undefined, "ExternalPort");
-    assert(res.NewInternalPort !== undefined, "InternalPort");
-    assert(res.NewInternalClient !== undefined, "InternalClient");
-    assert(res.NewProtocol !== undefined, "Protocol");
-    assert(res.NewLeaseDuration !== undefined, "LeaseDuration");
-    assert(res.NewPortMappingDescription !== undefined, "Description");
+    // Values, not just presence — an empty or renamed field would slip past
+    // an existence check.
+    assertEqual(Number(res.NewExternalPort), 16132, "ExternalPort");
+    assertEqual(Number(res.NewInternalPort), 16132, "InternalPort");
+    assertEqual(String(res.NewInternalClient), "172.16.32.143", "InternalClient");
+    assertEqual(String(res.NewProtocol), "TCP", "Protocol");
+    assertEqual(Number(res.NewLeaseDuration), 1856, "LeaseDuration");
+    assertEqual(String(res.NewPortMappingDescription), "FluxOS Reserved", "Description");
   });
 
   await test("TTL field is numeric across all router fixtures", () => {
+    let checked = 0;
     for (const router of routers) {
       const xml = loadFixture(`${router}-soap-GetSpecificPortMappingEntry.xml`);
       const body = xmlParser.parse(xml)?.Envelope?.Body;
-      if (body.Fault) continue; // Skip fault responses
+      assert(!body.Fault, `${router}: expected a mapping, got a fault`);
       const key = Object.keys(body).find((k) => k.startsWith("GetSpecificPortMappingEntryResponse"));
-      if (!key) continue;
+      assert(!!key, `${router}: no GetSpecificPortMappingEntryResponse`);
       const ttl = parseInt(body[key!].NewLeaseDuration, 10);
       assert(!isNaN(ttl), `${router}: TTL is NaN`);
       assert(ttl >= 0, `${router}: TTL is negative: ${ttl}`);
+      checked++;
+    }
+    // Without this the loop could skip every router and still report success.
+    assertEqual(checked, routers.length, "routers checked");
+  });
+
+  // ========================================
+  // Client, driven against each captured router
+  // ========================================
+  console.log("\n=== Client against captured routers ===\n");
+
+  // Matches the opnsense capture, so `local` is true there and false elsewhere.
+  const LOCAL_ADDRESS = "172.16.32.12";
+
+  const expectedExternalIp: Record<string, string> = {
+    "asus-rt-ax55": "203.0.113.11",
+    freebox: "203.0.113.12",
+    "linux-igd": "203.0.113.13",
+    mikrotik: "203.0.113.14",
+    "nec-sh621a1": "203.0.113.15",
+    "nokia-igd-v2": "203.0.113.16",
+    opnsense: "203.0.113.17",
+    "pfsense-2.7": "203.0.113.18",
+    "pfsense-2.8": "203.0.113.19",
+    "sagemcom-f5685": "203.0.113.20",
+    "sagemcom-livebox": "203.0.113.21",
+    "sercomm-gpon": "203.0.113.22",
+    technicolor: "203.0.113.23",
+  };
+
+  type ExpectedMapping = {
+    public: number;
+    host: string;
+    private: number;
+    protocol: string;
+    description: string;
+  };
+
+  const expectedGenericEntry: Record<string, ExpectedMapping> = {
+    "asus-rt-ax55": { public: 16137, host: "192.168.30.31", private: 16137, protocol: "tcp", description: "Flux_Backend_API" },
+    freebox: { public: 16122, host: "192.168.1.15", private: 16122, protocol: "tcp", description: "FluxOS Reserved" },
+    "linux-igd": { public: 16132, host: "192.168.20.21", private: 16132, protocol: "tcp", description: "FluxOS Reserved" },
+    mikrotik: { public: 0, host: "0.0.0.0", private: 0, protocol: "tcp", description: "Dummy inactive rule for windows to work" },
+    "nec-sh621a1": { public: 23106, host: "192.168.10.21", private: 23106, protocol: "tcp", description: "Flux_Test_App" },
+    "nokia-igd-v2": { public: 9153, host: "192.168.18.16", private: 9153, protocol: "udp", description: "Flux_Test_App" },
+    opnsense: { public: 16132, host: "172.16.32.143", private: 16132, protocol: "tcp", description: "FluxOS Reserved" },
+    "pfsense-2.7": { public: 16182, host: "192.168.164.87", private: 16182, protocol: "tcp", description: "FluxOS Reserved" },
+    "pfsense-2.8": { public: 16152, host: "10.23.4.83", private: 16152, protocol: "tcp", description: "FluxOS Reserved" },
+    "sagemcom-f5685": { public: 10928, host: "192.168.1.236", private: 32400, protocol: "tcp", description: "Plex Media Server" },
+    "sagemcom-livebox": { public: 16137, host: "192.168.1.112", private: 16137, protocol: "tcp", description: "Flux_Backend_API" },
+    "sercomm-gpon": { public: 16157, host: "192.168.1.11", private: 16157, protocol: "tcp", description: "Flux_Backend_API" },
+    technicolor: { public: 16182, host: "192.168.1.188", private: 16182, protocol: "tcp", description: "FluxOS Reserved" },
+  };
+
+  const expectedSpecificEntry: Record<string, { host: string; private: number; description: string }> = {
+    "asus-rt-ax55": { host: "192.168.30.31", private: 59988, description: "Fixture" },
+    freebox: { host: "192.168.1.28", private: 16159, description: "FixtureTest" },
+    "linux-igd": { host: "192.168.20.21", private: 59988, description: "Fixture" },
+    mikrotik: { host: "192.168.0.3", private: 59988, description: "Fixture" },
+    "nec-sh621a1": { host: "192.168.10.21", private: 59988, description: "Fixture" },
+    "nokia-igd-v2": { host: "192.168.18.19", private: 59988, description: "Fixture" },
+    opnsense: { host: "172.16.32.12", private: 59990, description: "FixtureTest" },
+    "pfsense-2.7": { host: "192.168.164.77", private: 59988, description: "Fixture" },
+    "pfsense-2.8": { host: "10.23.4.82", private: 59988, description: "Fixture" },
+    "sagemcom-f5685": { host: "192.168.1.74", private: 59988, description: "Fixture" },
+    "sagemcom-livebox": { host: "192.168.1.113", private: 59988, description: "Fixture" },
+    "sercomm-gpon": { host: "192.168.1.11", private: 59988, description: "Fixture" },
+    technicolor: { host: "192.168.1.202", private: 59988, description: "Fixture" },
+  };
+
+  async function withRouter<T>(
+    router: string,
+    fn: (client: Client) => Promise<T>
+  ): Promise<T> {
+    const restore = installFakeRouter(router);
+    const client = new Client({
+      url: DESCRIPTION_URL,
+      localAddress: LOCAL_ADDRESS,
+    });
+    try {
+      return await fn(client);
+    } finally {
+      client.close();
+      restore();
+    }
+  }
+
+  async function expectUpnpError(
+    promise: Promise<unknown>,
+    code: number,
+    what: string
+  ) {
+    try {
+      await promise;
+    } catch (err) {
+      assert(err instanceof UpnpError, `${what}: expected UpnpError, got ${err}`);
+      assertEqual((err as UpnpError).code, code, what);
+      return;
+    }
+    throw new Error(`${what}: expected UpnpError ${code}, but the call resolved`);
+  }
+
+  for (const router of routers) {
+    await test(`${router}: getPublicIp extracts the external address`, async () => {
+      const ip = await withRouter(router, (c) => c.getPublicIp());
+      assertEqual(ip, expectedExternalIp[router]);
+    });
+  }
+
+  for (const router of routers) {
+    await test(`${router}: getStatusInfo parses the link state`, async () => {
+      const status = await withRouter(router, (c) => c.getStatusInfo());
+      assertEqual(status.connectionStatus, "Connected");
+      assertEqual(status.lastConnectionError, "ERROR_NONE");
+      assert(status.uptime > 0, `uptime should be positive, got ${status.uptime}`);
+    });
+  }
+
+  for (const router of routers) {
+    if (router === "mikrotik") continue; // ends the walk with 402 — asserted separately
+    await test(`${router}: getMappings walks the table and stops at end-of-list`, async () => {
+      const expected = expectedGenericEntry[router];
+      const mappings = await withRouter(router, (c) => c.getMappings());
+      // Index 0 is the captured entry; index 1 faults with 713/714, which is
+      // what must terminate the walk. A broken guard would loop to MAX_MAPPINGS.
+      assertEqual(mappings.length, 1, `${router}: mapping count`);
+      const m = mappings[0];
+      assertEqual(m.public.port, expected.public, `${router}: public port`);
+      assertEqual(m.private.host, expected.host, `${router}: internal host`);
+      assertEqual(m.private.port, expected.private, `${router}: internal port`);
+      assertEqual(m.protocol, expected.protocol, `${router}: protocol`);
+      assertEqual(m.description, expected.description, `${router}: description`);
+      assertEqual(m.local, expected.host === LOCAL_ADDRESS, `${router}: local flag`);
+    });
+  }
+
+  for (const router of routers) {
+    await test(`${router}: getMapping returns the specific entry`, async () => {
+      const expected = expectedSpecificEntry[router];
+      const m = await withRouter(router, (c) => c.getMapping({ public: 16132 }));
+      assert(m !== null, `${router}: expected a mapping`);
+      assertEqual(m!.private.host, expected.host, `${router}: internal host`);
+      assertEqual(m!.private.port, expected.private, `${router}: internal port`);
+      assertEqual(m!.description, expected.description, `${router}: description`);
+      assertEqual(m!.public.port, 16132, `${router}: echoes requested port`);
+      assertEqual(m!.local, expected.host === LOCAL_ADDRESS, `${router}: local flag`);
+    });
+  }
+
+  for (const router of routers) {
+    if (router === "sagemcom-livebox") continue; // answers 606 — asserted separately
+    await test(`${router}: getMapping returns null when the router reports NotFound`, async () => {
+      const m = await withRouter(router, (c) =>
+        c.getMapping({ public: UNMAPPED_PORT })
+      );
+      assertEqual(m, null, `${router}: unmapped port should resolve to null`);
+    });
+  }
+
+  // The two routers below answer with codes getMappings/getMapping do not treat
+  // as "absent". Both currently propagate instead of resolving empty, so these
+  // pin the behaviour that exists — see the gaps noted alongside them.
+
+  await test("mikrotik: end-of-list arrives as 402, which getMappings does not absorb", async () => {
+    // Every other router ends the walk with 713. MikroTik sends 402 Invalid Args,
+    // which is not in the break set, so the whole listing throws.
+    await expectUpnpError(
+      withRouter("mikrotik", (c) => c.getMappings()),
+      402,
+      "mikrotik getMappings"
+    );
+  });
+
+  await test("sagemcom-livebox: a missing entry arrives as 606, which getMapping does not absorb", async () => {
+    // Elsewhere a missing entry is 714 and resolves to null. The Livebox answers
+    // 606 Action not authorized, so the lookup throws rather than reporting absence.
+    await expectUpnpError(
+      withRouter("sagemcom-livebox", (c) =>
+        c.getMapping({ public: UNMAPPED_PORT })
+      ),
+      606,
+      "sagemcom-livebox getMapping"
+    );
+  });
+
+  for (const router of routers) {
+    await test(`${router}: createMapping issues a permanent lease`, async () => {
+      const res = await withRouter(router, (c) =>
+        c.createMapping({ public: 16132, private: 16132, ttl: 0 })
+      );
+      assert(res !== undefined, `${router}: expected a response`);
+    });
+  }
+
+  for (const router of routers) {
+    if (router === "mikrotik") continue; // answers 725 — asserted separately below
+    await test(`${router}: createMapping accepts a timed lease`, async () => {
+      const res = await withRouter(router, (c) =>
+        c.createMapping({ public: 16132, private: 16132, ttl: 60 })
+      );
+      assert(res !== undefined, `${router}: expected a response`);
+    });
+  }
+
+  await test("mikrotik: a timed lease is rejected with 725 OnlyPermanentLeasesSupported", async () => {
+    await expectUpnpError(
+      withRouter("mikrotik", (c) =>
+        c.createMapping({ public: 16132, private: 16132, ttl: 60 })
+      ),
+      725,
+      "mikrotik createMapping ttl=60"
+    );
+  });
+
+  for (const router of routers) {
+    if (router === "freebox" || router === "mikrotik") continue; // answer 714 below
+    await test(`${router}: removeMapping succeeds`, async () => {
+      const res = await withRouter(router, (c) =>
+        c.removeMapping({ public: 16132 })
+      );
+      assert(res !== undefined, `${router}: expected a response`);
+    });
+  }
+
+  for (const router of ["freebox", "mikrotik"]) {
+    await test(`${router}: removeMapping surfaces 714 NoSuchEntryInArray`, async () => {
+      await expectUpnpError(
+        withRouter(router, (c) => c.removeMapping({ public: 16132 })),
+        714,
+        `${router} removeMapping`
+      );
+    });
+  }
+
+  for (const router of routers) {
+    await test(`${router}: getCapabilities reads the action list from SCPD`, async () => {
+      const caps = await withRouter(router, async (c) => {
+        const info = await c.getGateway();
+        return info.getCapabilities();
+      });
+      assert(caps !== null, `${router}: expected capabilities`);
+      assert(caps!.actions.length > 0, `${router}: expected a non-empty action list`);
+      assert(
+        caps!.actions.includes("AddPortMapping"),
+        `${router}: AddPortMapping should be advertised`
+      );
+      assertEqual(
+        caps!.supportsGetSpecificPortMappingEntry,
+        caps!.actions.includes("GetSpecificPortMappingEntry"),
+        `${router}: capability flag should track the action list`
+      );
+    });
+  }
+
+  for (const router of routers) {
+    await test(`${router}: getDevice reports the manufacturer and model`, async () => {
+      const expected = expectedDevices[router];
+      const device = await withRouter(router, async (c) => {
+        const info = await c.getGateway();
+        return info.getDevice();
+      });
+      assert(device !== null, `${router}: expected device info`);
+      assertEqual(device!.manufacturer, expected.manufacturer, `${router}: manufacturer`);
+      assertEqual(device!.modelName, expected.modelName, `${router}: modelName`);
+    });
+  }
+
+  await test("Client surfaces a transport failure rather than swallowing it", async () => {
+    const restore = installFakeRouter("opnsense");
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+    try {
+      // A non-SOAP transport error carries no fault body, so it must propagate.
+      (axiosModule as any).post = async () => {
+        throw new Error("socket hang up");
+      };
+      let threw = false;
+      try {
+        await client.getStatusInfo();
+      } catch (err: any) {
+        threw = true;
+        assertEqual(err.message, "socket hang up");
+      }
+      assert(threw, "expected the transport error to propagate");
+    } finally {
+      client.close();
+      restore();
     }
   });
 

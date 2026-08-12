@@ -122,7 +122,7 @@ export class Ssdp implements ISsdp {
   }
 }
 
-function parseMimeHeader(headerStr: string) {
+export function parseMimeHeader(headerStr: string) {
   const lines = headerStr.split(/\r?\n/);
   return lines.reduce<Record<string, string>>((headers, line) => {
     const match = line.match(/^([^:]+)\s*:\s*(.*)$/);

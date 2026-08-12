@@ -6,6 +6,7 @@ import Device, {
   decodeXmlEntities,
   fieldValue,
   xmlParser,
+  ONLY_PERMANENT_LEASES,
 } from "./device";
 import Ssdp from "./ssdp";
 
@@ -100,7 +101,7 @@ export class Client implements IClient {
     const localAddress = await info.getLocalAddress();
     const ports = normalizeOptions(options);
 
-    return info.gateway.run("AddPortMapping", [
+    const args = (lease: number | string): (string | number)[][] => [
       ["NewRemoteHost", ports.remote.host ?? ""],
       ["NewExternalPort", String(ports.remote.port)],
       ["NewProtocol", (options.protocol || "TCP").toUpperCase()],
@@ -108,8 +109,25 @@ export class Client implements IClient {
       ["NewInternalClient", ports.internal.host || localAddress],
       ["NewEnabled", 1],
       ["NewPortMappingDescription", options.description || "node:nat:upnp"],
-      ["NewLeaseDuration", options.ttl ?? 60 * 30],
-    ]);
+      ["NewLeaseDuration", lease],
+    ];
+
+    const requested = options.ttl ?? 60 * 30;
+
+    try {
+      return await info.gateway.run("AddPortMapping", args(requested));
+    } catch (err) {
+      // 725 is the router stating it keeps permanent mappings only. Asking
+      // again without a lease gives the caller more than it requested rather
+      // than nothing at all, so it is worth one retry. Every other refusal is
+      // left to the caller: 718 means the port is taken and retrying
+      // identically would fail identically, and 501 says only that something
+      // went wrong, which is no basis for guessing.
+      const refusedTheLease =
+        err instanceof UpnpError && err.code === ONLY_PERMANENT_LEASES && Number(requested) !== 0;
+      if (!refusedTheLease) throw err;
+      return info.gateway.run("AddPortMapping", args(0));
+    }
   }
 
   public async removeMapping(options: DeletePortMappingOpts): Promise<RawResponse> {

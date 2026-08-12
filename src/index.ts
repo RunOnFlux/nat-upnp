@@ -1,4 +1,10 @@
-export { Device, UpnpError, xmlParser } from "./nat-upnp/device";
+export {
+  Device,
+  UpnpError,
+  UPNP_ERROR_CODES,
+  ONLY_PERMANENT_LEASES,
+  xmlParser,
+} from "./nat-upnp/device";
 export type {
   GatewayDevice,
   ServiceCapabilities,

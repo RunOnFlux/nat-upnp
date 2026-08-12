@@ -516,6 +516,39 @@ function throwIfSoapFault(data: string, action: string): void {
  * - 728: NoPortMapsAvailable
  * - 729: ConflictWithOtherMechanisms
  */
+/**
+ * The UPnP error codes, as the specification defines them.
+ *
+ * The number is the reliable part. Routers word the description themselves and
+ * do not agree: across a fleet survey, 713 arrived as both
+ * "SpecifiedArrayIndexInvalid" and "Bad Array Index", 714 as both
+ * "NoSuchEntryInArray" and "No Such Entry", and 402 as both "Invalid Args" and
+ * "Invalid NewPortMappingIndex". Match on `UpnpError.code`, never on the text,
+ * and use this table when a code needs explaining to a human.
+ *
+ * Routers also differ on which code they use for a situation — MikroTik ends a
+ * mapping walk with 402 where most send 713 — so this gives the specified
+ * meaning, not a guarantee of what a particular router meant by it.
+ */
+export const UPNP_ERROR_CODES: Readonly<Record<number, string>> = Object.freeze({
+  401: "Invalid Action",
+  402: "Invalid Args",
+  501: "Action Failed",
+  606: "Action Not Authorized",
+  713: "Specified Array Index Invalid",
+  714: "No Such Entry In Array",
+  715: "Wildcard Not Permitted In Source IP",
+  716: "Wildcard Not Permitted In External Port",
+  718: "Conflict In Mapping Entry",
+  724: "Same Port Values Required",
+  725: "Only Permanent Leases Supported",
+  726: "Remote Host Only Supports Wildcard",
+  727: "External Port Only Supports Wildcard",
+});
+
+/** The router accepts permanent mappings only, so a timed lease is refused. */
+export const ONLY_PERMANENT_LEASES = 725;
+
 export class UpnpError extends Error {
   readonly code: number;
   readonly description: string;

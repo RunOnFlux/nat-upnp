@@ -130,11 +130,21 @@ export class Client implements IClient {
           ["NewPortMappingIndex", i],
         ]);
       } catch (err) {
-        // End-of-list: routers signal this with specific error codes.
-        // This covers both "no mappings" (i=0) and "end of list" (i>0).
-        if (err instanceof UpnpError && (err.code === 713 || err.code === 714)) break;
-        // Any other error (unsupported action, network failure, timeout) — throw
-        // so the caller knows something went wrong, not that the router is empty.
+        // Routers do not agree on how they signal "no entry at that index".
+        // 713 and 714 are the common answers, but MikroTik replies 402 Invalid
+        // Args, so keying on the pair alone turns the end of a MikroTik walk
+        // into a thrown error and loses the whole listing.
+        //
+        // Past the first index any UPnP fault means the table ran out: entries
+        // have already been read, so the router is answering about an index it
+        // does not have. At the first index only the absence codes are treated
+        // that way, so a genuinely unsupported action still surfaces rather
+        // than being reported as an empty table.
+        if (err instanceof UpnpError) {
+          if (i > 0 || err.code === 713 || err.code === 714) break;
+        }
+        // Transport failures always propagate: a dead socket is not an empty
+        // router.
         throw err;
       }
 
@@ -360,13 +370,15 @@ export class Client implements IClient {
       });
     });
 
-    // Clean up SSDP socket after discovery (success or failure) — no leaks
-    promise.finally(() => {
+    // Clean up SSDP socket after discovery (success or failure) — no leaks.
+    // The chained promise must be the one returned: .finally() produces a new
+    // promise that adopts the rejection, so discarding it leaves an orphan that
+    // Node reports as an unhandled rejection and, by default, exits on — even
+    // when the caller has correctly caught the error from `promise` itself.
+    return promise.finally(() => {
       ssdp.close();
       this.pendingGateway = null;
     });
-
-    return promise;
   }
 
   public close() {

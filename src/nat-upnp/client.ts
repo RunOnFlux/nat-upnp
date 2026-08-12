@@ -1,5 +1,11 @@
 import { RawResponse } from "../index";
-import Device, { GatewayDevice, ServiceCapabilities, UpnpError, xmlParser } from "./device";
+import Device, {
+  GatewayDevice,
+  ServiceCapabilities,
+  UpnpError,
+  decodeXmlEntities,
+  xmlParser,
+} from "./device";
 import Ssdp from "./ssdp";
 
 /**
@@ -284,7 +290,11 @@ export class Client implements IClient {
     const portListing = res.NewPortListing;
     if (!portListing) return [];
 
-    const parsed = xmlParser.parse(String(portListing));
+    // NewPortListing carries an XML document inside a string, so it arrives
+    // escaped. The shared parser leaves entities alone for XXE protection, so
+    // without decoding first the inner parse finds no elements and every router
+    // looks like it has no mappings at all.
+    const parsed = xmlParser.parse(decodeXmlEntities(String(portListing)));
     const list = parsed?.PortMappingList?.PortMappingEntry;
     if (!list) return [];
 

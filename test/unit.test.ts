@@ -1804,6 +1804,80 @@ function getSoapFaultCode(xml: string): number | null {
     });
   }
 
+  for (const router of surveyedRouters) {
+    await test(`${router.slug}: create and remove behave as this router answers`, async () => {
+      const restore = installFakeRouter(router.slug);
+      const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+      try {
+        // Nothing is assumed about either lease: routers disagree on both, and
+        // the corpus has one that refuses even a permanent mapping with 501.
+        async function expectLease(ttl: number, expected: number | null, what: string) {
+          let code: number | null = null;
+          try {
+            const res = await client.createMapping({ public: 8080, private: 8080, ttl });
+            assert(res !== undefined, `${what}: expected a response`);
+          } catch (err) {
+            code = err instanceof UpnpError ? err.code : -1;
+          }
+          assertEqual(code, expected, `${what} for ${router.slug}`);
+        }
+
+        await expectLease(0, router.ttl0Code, "permanent lease");
+        await expectLease(60, router.ttl60Code, "timed lease");
+
+        // Delete either succeeds or reports a UPnP fault; it must never hang or
+        // return something that is not a response.
+        try {
+          const removed = await client.removeMapping({ public: 8080 });
+          assert(removed !== undefined, "delete response");
+        } catch (err) {
+          assert(err instanceof UpnpError, `delete should fail as UpnpError, got ${err}`);
+        }
+      } finally {
+        client.close();
+        restore();
+      }
+    });
+  }
+
+  for (const router of surveyedRouters.filter((r) => r.actions.includes("GetListOfPortMappings"))) {
+    await test(`${router.slug}: getMappingRange parses its captured listing`, async () => {
+      const mappings = await withRouter(router.slug, (c) =>
+        c.getMappingRange({ startPort: 1, endPort: 65535 })
+      );
+      // The listing is the router's own; assert it parsed into something
+      // coherent rather than the empty list a decoding slip would produce.
+      assert(Array.isArray(mappings), "a list is returned");
+      for (const m of mappings) {
+        assert(m.public.port >= 0 && m.public.port <= 65535, `external port ${m.public.port}`);
+        assert(typeof m.description === "string", "description is a string");
+        assert(m.protocol === "tcp" || m.protocol === "udp", `protocol ${m.protocol}`);
+      }
+    });
+  }
+
+  await test("the captured v2 responses are the ones being served", async () => {
+    // Guards the harness itself: the synthetic shapes must never take
+    // precedence over a real capture, or the fleet data would go unused.
+    const withCapture = surveyedRouters.filter((r) =>
+      r.actions.includes("GetListOfPortMappings")
+    );
+    assert(withCapture.length > 0, "expected routers advertising GetListOfPortMappings");
+    const nonEmpty = [];
+    for (const router of withCapture) {
+      const mappings = await withRouter(router.slug, (c) =>
+        c.getMappingRange({ startPort: 1, endPort: 65535 })
+      );
+      if (mappings.length > 0) nonEmpty.push(router.slug);
+    }
+    // The synthetic listing always yields exactly two entries, so a corpus
+    // where every router returns two would mean nothing real is being read.
+    assert(
+      nonEmpty.length > 0,
+      "expected at least one router to return mappings from its captured listing"
+    );
+  });
+
   await test("the corpus covers the disagreements the fleet actually shows", async () => {
     // A guard on the corpus itself: if a regeneration quietly dropped the
     // outliers, these tests would still pass while testing nothing unusual.

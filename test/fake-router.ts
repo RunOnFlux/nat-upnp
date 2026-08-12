@@ -8,6 +8,15 @@ export function loadFixture(name: string): string {
   return readFileSync(join(fixturesDir, name), "utf-8");
 }
 
+/** Read a fixture if it exists; not every router contributed every response. */
+export function tryFixture(name: string): string | null {
+  try {
+    return readFileSync(join(fixturesDir, name), "utf-8");
+  } catch {
+    return null;
+  }
+}
+
 /** Host the fake router answers on. Relative URLs in a fixture resolve against it. */
 export const DESCRIPTION_URL = "http://192.0.2.1:5000/rootDesc.xml";
 
@@ -103,6 +112,18 @@ export function portListing(
   return `<p:PortMappingList xmlns:p="urn:schemas-upnp-org:gw:WANIPConnection">${body}</p:PortMappingList>`;
 }
 
+/** The three IGD v2 actions, the only ones with synthetic fallbacks. */
+const V2_ACTIONS = new Set([
+  "AddAnyPortMapping",
+  "GetListOfPortMappings",
+  "DeletePortMappingRange",
+]);
+
+/** True when a test is steering the v2 answers itself. */
+function usingV2Overrides(): boolean {
+  return v2Escaped || v2Overrides.reservedPort !== undefined || v2Overrides.listing !== undefined;
+}
+
 /** Send the listing entity-escaped instead of in CDATA. */
 export let v2Escaped = false;
 export function setV2Escaped(on: boolean): void {
@@ -193,8 +214,15 @@ export function installFakeRouter(router: string, breakage?: Breakage): () => vo
         };
     }
 
-    // No router capture exists for the v2 actions, so those are answered from
-    // the spec-derived shapes above rather than from a fixture file.
+    // For the v2 actions a captured response always wins: the synthetic shapes
+    // exist only for routers the survey could not record, and preferring them
+    // would throw away the real data collected from the fleet. Only these three
+    // are eligible — every other action picks its file through fixtureFor,
+    // which selects by request (index, lease, port) and must not be bypassed.
+    if (V2_ACTIONS.has(action) && !usingV2Overrides()) {
+      const captured = tryFixture(`${router}-soap-${action}.xml`);
+      if (captured) return { data: captured };
+    }
     const synthetic = v2Response(action);
     if (synthetic) return { data: synthetic };
 

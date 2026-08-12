@@ -16,7 +16,9 @@ export interface RouterExpectation {
   actions: string[];
   endOfListCode: number | null;
   notFoundCode: number | null;
+  ttl0Code: number | null;
   ttl60Code: number | null;
+  deleteCode: number | null;
   genericEntry: {
     external: number;
     internal: number;
@@ -60,7 +62,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16187,
       "internal": 16187,
@@ -102,7 +106,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16167,
       "internal": 16167,
@@ -144,7 +150,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16177,
       "internal": 16177,
@@ -200,7 +208,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16127,
       "internal": 16127,
@@ -256,7 +266,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16137,
       "internal": 16137,
@@ -308,7 +320,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 29562,
       "internal": 32400,
@@ -351,7 +365,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 36666,
       "internal": 36666,
@@ -393,7 +409,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": 718,
+    "deleteCode": null,
     "genericEntry": {
       "external": 30013,
       "internal": 30013,
@@ -436,7 +454,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 54784,
       "internal": 54784,
@@ -481,7 +501,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16137,
       "internal": 16137,
@@ -526,7 +548,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16132,
       "internal": 16132,
@@ -571,7 +595,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16187,
       "internal": 16187,
@@ -614,7 +640,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16127,
       "internal": 16127,
@@ -657,7 +685,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16172,
       "internal": 16172,
@@ -699,7 +729,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 28716,
       "internal": 28716,
@@ -744,7 +776,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 36666,
       "internal": 36666,
@@ -787,7 +821,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16127,
       "internal": 16127,
@@ -843,7 +879,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16127,
       "internal": 16127,
@@ -899,7 +937,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16162,
       "internal": 16162,
@@ -950,7 +990,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16172,
       "internal": 16172,
@@ -987,7 +1029,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16187,
       "internal": 16187,
@@ -1029,7 +1073,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 59347,
       "internal": 41641,
@@ -1071,7 +1117,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16132,
       "internal": 16132,
@@ -1113,7 +1161,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": 725,
+    "deleteCode": null,
     "genericEntry": {
       "external": 0,
       "internal": 0,
@@ -1154,7 +1204,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16132,
       "internal": 16132,
@@ -1196,7 +1248,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": null,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16182,
       "internal": 16182,
@@ -1238,7 +1292,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 402,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 29458,
       "internal": 29458,
@@ -1280,7 +1336,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 402,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 46939,
       "internal": 46939,
@@ -1322,7 +1380,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 402,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 22610,
       "internal": 22610,
@@ -1367,7 +1427,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16122,
       "internal": 16122,
@@ -1409,7 +1471,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16159,
       "internal": 0,
@@ -1452,7 +1516,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16132,
       "internal": 16132,
@@ -1505,7 +1571,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16137,
       "internal": 16137,
@@ -1557,7 +1625,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16122,
       "internal": 16122,
@@ -1609,7 +1679,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16197,
       "internal": 16197,
@@ -1651,7 +1723,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 6799,
       "internal": 6799,
@@ -1693,7 +1767,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16137,
       "internal": 16137,
@@ -1735,7 +1811,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16122,
       "internal": 16122,
@@ -1777,7 +1855,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16197,
       "internal": 16197,
@@ -1819,7 +1899,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16187,
       "internal": 16187,
@@ -1861,7 +1943,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16137,
       "internal": 16137,
@@ -1903,7 +1987,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 21133,
       "internal": 21133,
@@ -1945,7 +2031,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": 501,
     "ttl60Code": 501,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16137,
       "internal": 16137,
@@ -1987,7 +2075,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16167,
       "internal": 16167,
@@ -2029,7 +2119,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16122,
       "internal": 16122,
@@ -2071,7 +2163,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 81,
       "internal": 81,
@@ -2113,7 +2207,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 402,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 40241,
       "internal": 40241,
@@ -2155,7 +2251,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 402,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 35559,
       "internal": 35559,
@@ -2200,7 +2298,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 36666,
       "internal": 36666,
@@ -2245,7 +2345,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16122,
       "internal": 16122,
@@ -2290,7 +2392,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16122,
       "internal": 16122,
@@ -2335,7 +2439,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16127,
       "internal": 16127,
@@ -2380,7 +2486,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16137,
       "internal": 16137,
@@ -2425,7 +2533,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16127,
       "internal": 16127,
@@ -2470,7 +2580,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16197,
       "internal": 16197,
@@ -2515,7 +2627,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16137,
       "internal": 16137,
@@ -2557,7 +2671,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16127,
       "internal": 16127,
@@ -2599,7 +2715,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16152,
       "internal": 16152,
@@ -2641,7 +2759,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 3478,
       "internal": 3478,
@@ -2686,7 +2806,9 @@ export const surveyedRouters: RouterExpectation[] = [
     ],
     "endOfListCode": 713,
     "notFoundCode": 714,
+    "ttl0Code": null,
     "ttl60Code": null,
+    "deleteCode": null,
     "genericEntry": {
       "external": 16157,
       "internal": 16157,

@@ -358,10 +358,24 @@ setupTest("NAT-UPNP/Client", (opts) => {
           console.log("  Default client correctly failed");
         }
 
-        return (
-          JSON.stringify(defaultMappings) === JSON.stringify(cachedMappings) &&
-          defaultFailed
-        );
+        // Compare identity, not the countdown. ttl is the router's *remaining*
+        // lease, so it decrements once a second on a live table; comparing the
+        // raw objects made this a race against the wall clock, failing whenever
+        // a second boundary fell between the two reads.
+        const identity = (mappings: Mapping[]) =>
+          JSON.stringify(
+            mappings.map((m) => [
+              m.protocol,
+              m.public.host,
+              m.public.port,
+              m.private.host,
+              m.private.port,
+              m.enabled,
+              m.description,
+            ])
+          );
+
+        return identity(defaultMappings) === identity(cachedMappings) && defaultFailed;
       } finally {
         console.log("  Unblocking SSDP via iptables...");
         execSync("iptables -D OUTPUT -p udp --dport 1900 -j DROP");

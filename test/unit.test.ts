@@ -2,7 +2,7 @@ import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { XMLParser } from "fast-xml-parser";
 import axiosModule from "axios";
-import { UpnpError, decodeXmlEntities } from "../src/nat-upnp/device";
+import { UpnpError, UPNP_ERROR_CODES, decodeXmlEntities } from "../src/nat-upnp/device";
 import { Device } from "../src/nat-upnp/device";
 import { Client } from "../src/nat-upnp/client";
 import { parseMimeHeader, Ssdp, type SsdpEmitter } from "../src/nat-upnp/ssdp";
@@ -957,14 +957,12 @@ function getSoapFaultCode(xml: string): number | null {
     });
   }
 
-  await test("mikrotik: a timed lease is rejected with 725 OnlyPermanentLeasesSupported", async () => {
-    await expectUpnpError(
-      withRouter("mikrotik", (c) =>
-        c.createMapping({ public: 16132, private: 16132, ttl: 60 })
-      ),
-      725,
-      "mikrotik createMapping ttl=60"
+  await test("mikrotik: a timed lease becomes a permanent one rather than failing", async () => {
+    // The router answers 725 to any lease; the client retries without one.
+    const created = await withRouter("mikrotik", (c) =>
+      c.createMapping({ public: 16132, private: 16132, ttl: 60 })
     );
+    assert(created !== undefined, "a mapping is created despite the refusal");
   });
 
   for (const router of routers) {
@@ -1514,6 +1512,87 @@ function getSoapFaultCode(xml: string): number | null {
     } finally {
       setV2Overrides({});
     }
+  });
+
+  // ========================================
+  // Error codes and the permanent-lease retry
+  // ========================================
+  console.log("\n=== Error codes ===\n");
+
+  await test("the error code table covers every code the corpus produced", () => {
+    // Codes the surveyed routers actually returned, so the table cannot drift
+    // away from what is out there.
+    for (const code of [401, 402, 501, 606, 713, 714, 718, 725]) {
+      assert(
+        typeof UPNP_ERROR_CODES[code] === "string" && UPNP_ERROR_CODES[code].length > 0,
+        `no entry for ${code}`
+      );
+    }
+  });
+
+  await test("the table is the spec meaning, not the router's wording", () => {
+    // Routers word the same code differently -- 713 arrives as both
+    // "SpecifiedArrayIndexInvalid" and "Bad Array Index" -- so the table gives
+    // one canonical meaning and UpnpError keeps whatever the router said.
+    assertEqual(UPNP_ERROR_CODES[713], "Specified Array Index Invalid", "713");
+    assertEqual(UPNP_ERROR_CODES[714], "No Such Entry In Array", "714");
+    assertEqual(UPNP_ERROR_CODES[725], "Only Permanent Leases Supported", "725");
+    const err = new UpnpError(713, "Bad Array Index", "GetGenericPortMappingEntry");
+    assertEqual(err.description, "Bad Array Index", "the router's own words are preserved");
+  });
+
+  await test("the table cannot be modified by a caller", () => {
+    const before = UPNP_ERROR_CODES[725];
+    try {
+      (UPNP_ERROR_CODES as any)[725] = "tampered";
+    } catch {
+      /* frozen objects throw in strict mode */
+    }
+    assertEqual(UPNP_ERROR_CODES[725], before, "the table is frozen");
+  });
+
+  await test("a router refusing a timed lease is retried permanently", async () => {
+    // MikroTik answers 725 to any lease. The caller asked for 60 seconds and
+    // gets a permanent mapping, which is more than it asked for rather than
+    // nothing at all.
+    const created = await withRouter("mikrotik", (c) =>
+      c.createMapping({ public: 16132, private: 16132, ttl: 60 })
+    );
+    assert(created !== undefined, "the retry produced a mapping");
+    const leases = requests
+      .filter((r) => r.action === "AddPortMapping")
+      .map((r) => /<NewLeaseDuration>([^<]*)</.exec(r.body)?.[1]);
+    assertEqual(leases.join(","), "60,0", "asked for 60 first, then retried at 0");
+  });
+
+  await test("the permanent retry happens once, not in a loop", async () => {
+    // The retry uses lease 0, which mikrotik accepts. If it did not, one retry
+    // is still all that is attempted.
+    await withRouter("mikrotik", (c) => c.createMapping({ public: 16132, private: 16132, ttl: 60 }));
+    const attempts = requests.filter((r) => r.action === "AddPortMapping").length;
+    assertEqual(attempts, 2, "exactly two attempts");
+  });
+
+  await test("a request already asking for a permanent lease is not retried", async () => {
+    await withRouter("mikrotik", (c) => c.createMapping({ public: 16132, private: 16132, ttl: 0 }));
+    const attempts = requests.filter((r) => r.action === "AddPortMapping").length;
+    assertEqual(attempts, 1, "no retry when the lease was already permanent");
+  });
+
+  await test("a refusal that is not 725 is passed straight to the caller", async () => {
+    // tp-link-archer-ax72 answers 501, which says only that something failed.
+    // Guessing at a remedy would replace a clear error with a confusing one.
+    const router = surveyedRouters.find((r) => r.slug === "tp-link-archer-ax72");
+    assert(!!router, "expected the 501 router in the corpus");
+    await expectUpnpError(
+      withRouter("tp-link-archer-ax72", (c) =>
+        c.createMapping({ public: 8080, private: 8080, ttl: 60 })
+      ),
+      501,
+      "a 501 refusal"
+    );
+    const attempts = requests.filter((r) => r.action === "AddPortMapping").length;
+    assertEqual(attempts, 1, "no retry on 501");
   });
 
   // ========================================
@@ -2431,7 +2510,11 @@ function getSoapFaultCode(xml: string): number | null {
         }
 
         await expectLease(0, router.ttl0Code, "permanent lease");
-        await expectLease(60, router.ttl60Code, "timed lease");
+        // A 725 refusal is retried without a lease, so the caller sees success
+        // wherever the permanent attempt would also have succeeded.
+        const timedOutcome =
+          router.ttl60Code === 725 ? router.ttl0Code : router.ttl60Code;
+        await expectLease(60, timedOutcome, "timed lease");
 
         // Delete either succeeds or reports a UPnP fault; it must never hang or
         // return something that is not a response.

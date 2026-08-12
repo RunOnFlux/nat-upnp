@@ -1110,7 +1110,7 @@ function getSoapFaultCode(xml: string): number | null {
     "nec-sh621a1": { friendlyName: "SH621A1", manufacturer: "NEC Corporation/NEC Platforms, Ltd.", modelName: "SH621A1", modelNumber: "", modelDescription: "Broadband Router and Wireless Access Point", specVersion: { major: 1, minor: 0 } },
     "sagemcom-livebox": { friendlyName: "Orange Livebox", manufacturer: "Sagemcom", modelName: "Residential Livebox (GPON, WAN Ethernet)", modelNumber: "5", modelDescription: "Sagemcom,fr,SGFI-fr-G06.R05.C05_20", specVersion: { major: 1, minor: 0 } },
     "sagemcom-f5685": { friendlyName: "Sagemcom F5685LGB", manufacturer: "Sagemcom", modelName: "F5685LGB", modelNumber: "F5685LGB", modelDescription: "F@ST 5685 LG, Mercury v3", specVersion: { major: 1, minor: 0 } },
-    "nokia-igd-v2": { friendlyName: "Internet Home Gateway Device", manufacturer: "Nokia", modelName: "IGD Version 2.00", modelNumber: "2", modelDescription: "Optical-fiber Broadband Router", specVersion: { major: 1, minor: 0 } },
+    "nokia-igd-v2": { friendlyName: "Internet Home Gateway Device", manufacturer: "Nokia", modelName: "IGD Version 2.00", modelNumber: "2.00", modelDescription: "Optical-fiber Broadband Router", specVersion: { major: 1, minor: 0 } },
     mikrotik: { friendlyName: "MikroTik Router", manufacturer: "MikroTik", modelName: "Router OS", modelNumber: "", modelDescription: "", specVersion: { major: 1, minor: 0 } },
     freebox: { friendlyName: "Freebox Server", manufacturer: "Freebox", modelName: "Freebox Server", modelNumber: "6", modelDescription: "NAS/Modem/Routeur ADSL/FTTH", specVersion: { major: 1, minor: 0 } },
     "linux-igd": { friendlyName: "Linux Internet Gateway Device", manufacturer: "Linux UPnP IGD Project", modelName: "IGD Version 1.00", modelNumber: "", modelDescription: "", specVersion: { major: 1, minor: 0 } },
@@ -1517,6 +1517,104 @@ function getSoapFaultCode(xml: string): number | null {
   });
 
   // ========================================
+  // Local address resolution
+  // ========================================
+  console.log("\n=== Local address resolution ===\n");
+
+  // A UDP "connect" sends no packet; it asks the kernel which interface would
+  // reach the router and reads the answer back off the socket. Nothing in the
+  // suite could reach this without a fake socket.
+
+  async function withDgram<T>(fn: (sockets: FakeSocket[]) => Promise<T>): Promise<T> {
+    const fake = installFakeDgram();
+    try {
+      return await fn(fake.sockets);
+    } finally {
+      fake.restore();
+    }
+  }
+
+  await test("the local address comes from a socket connected to the router", async () => {
+    await withDgram(async (sockets) => {
+      FakeSocket.localAddress = "10.1.2.3";
+      const device = new Device("http://192.168.7.1:5000/rootDesc.xml");
+      assertEqual(await device.getLocalAddress(), "10.1.2.3", "address");
+      assertEqual(sockets.length, 1, "one socket");
+      assertEqual(sockets[0].connectedTo?.address, "192.168.7.1", "connects to the router");
+      assertEqual(sockets[0].connectedTo?.port, 80, "port 80");
+      assertEqual(sockets[0].closed, true, "socket is released");
+    });
+  });
+
+  await test("a failed connect resolves to an empty address rather than throwing", async () => {
+    await withDgram(async () => {
+      FakeSocket.failNextConnect = true;
+      const device = new Device("http://192.168.7.1:5000/rootDesc.xml");
+      assertEqual(await device.getLocalAddress(), "", "unreachable router yields no address");
+    });
+  });
+
+  await test("a connect that never answers is abandoned rather than hanging", async () => {
+    await withDgram(async (sockets) => {
+      FakeSocket.hangNextConnect = true;
+      const device = new Device("http://192.168.7.1:5000/rootDesc.xml");
+      // The timeout is the only thing that can end this; without it the call
+      // would never settle.
+      const settled = await Promise.race([
+        device.getLocalAddress(),
+        new Promise((r) => setTimeout(() => r("__never__"), 6500)),
+      ]);
+      assertEqual(settled, "", "the timeout path yields an empty address");
+      assertEqual(sockets[0].closed, true, "the abandoned socket is closed");
+    });
+  });
+
+  await test("a hostname that is not IPv4 skips the socket entirely", async () => {
+    await withDgram(async (sockets) => {
+      // A DNS name or IPv6 literal cannot be used for the udp4 route query.
+      const device = new Device("http://router.local:5000/rootDesc.xml");
+      assertEqual(await device.getLocalAddress(), "", "no address");
+      assertEqual(sockets.length, 0, "no socket is opened");
+    });
+  });
+
+  await test("the resolved address is cached, so the query runs once", async () => {
+    await withDgram(async (sockets) => {
+      FakeSocket.localAddress = "10.9.9.9";
+      const device = new Device("http://192.168.7.1:5000/rootDesc.xml");
+      assertEqual(await device.getLocalAddress(), "10.9.9.9", "first call");
+      assertEqual(await device.getLocalAddress(), "10.9.9.9", "second call");
+      assertEqual(sockets.length, 1, "the second call reuses the cached answer");
+    });
+  });
+
+  await test("a failed resolution is not cached, so a later call retries", async () => {
+    await withDgram(async (sockets) => {
+      FakeSocket.failNextConnect = true;
+      const device = new Device("http://192.168.7.1:5000/rootDesc.xml");
+      assertEqual(await device.getLocalAddress(), "", "first call fails");
+      FakeSocket.localAddress = "10.4.5.6";
+      assertEqual(await device.getLocalAddress(), "10.4.5.6", "second call succeeds");
+      assertEqual(sockets.length, 2, "a second socket is opened for the retry");
+    });
+  });
+
+  await test("a supplied localAddress bypasses resolution altogether", async () => {
+    await withDgram(async (sockets) => {
+      const client = new Client({ url: DESCRIPTION_URL, localAddress: "172.16.32.12" });
+      const restore = installFakeRouter("opnsense");
+      try {
+        const info = await client.getGateway();
+        assertEqual(await info.getLocalAddress(), "172.16.32.12", "the override is used");
+        assertEqual(sockets.length, 0, "no route query is made");
+      } finally {
+        client.close();
+        restore();
+      }
+    });
+  });
+
+  // ========================================
   // SSDP discovery over a fake UDP socket
   // ========================================
   console.log("\n=== SSDP discovery ===\n");
@@ -1742,24 +1840,66 @@ function getSoapFaultCode(xml: string): number | null {
       try {
         const info = await client.getGateway();
 
+        // Every field the description carries, not a sample of three: a
+        // mutation in any one of them should fail here.
         const device = await info.getDevice();
         assert(device !== null, "device info");
         assertEqual(device!.manufacturer, router.manufacturer, "manufacturer");
         assertEqual(device!.modelName, router.modelName, "modelName");
+        assertEqual(device!.modelNumber, router.modelNumber, "modelNumber");
+        assertEqual(device!.modelDescription, router.modelDescription, "modelDescription");
+        assertEqual(device!.friendlyName, router.friendlyName, "friendlyName");
+        assertEqual(device!.manufacturerURL, router.manufacturerURL, "manufacturerURL");
+        assertEqual(device!.modelURL, router.modelURL, "modelURL");
+        assertEqual(device!.presentationURL, router.presentationURL, "presentationURL");
+        assertEqual(device!.configId, router.configId, "configId");
         assertEqual(device!.specVersion.major, router.specMajor, "spec major");
+        assertEqual(device!.specVersion.minor, router.specMinor, "spec minor");
+        assertEqual(device!.descriptionURL, DESCRIPTION_URL, "descriptionURL");
+
+        if (router.wan) {
+          assert(device!.wan !== undefined, "WAN sub-device found");
+          assertEqual(device!.wan!.manufacturer, router.wan.manufacturer, "wan manufacturer");
+          assertEqual(device!.wan!.modelName, router.wan.modelName, "wan modelName");
+          assertEqual(device!.wan!.modelNumber, router.wan.modelNumber, "wan modelNumber");
+          assertEqual(
+            device!.wan!.modelDescription,
+            router.wan.modelDescription,
+            "wan modelDescription"
+          );
+        }
 
         const caps = await info.getCapabilities();
         assert(caps !== null, "capabilities");
+        assertEqual(caps!.serviceType, router.serviceType, "service type");
         assertEqual(caps!.serviceVersion, router.serviceVersion, "service version");
+        // Compared as sets: the library preserves SCPD document order, the
+        // generator sorts. What matters is that none are lost or invented.
         assertEqual(
-          caps!.actions.length,
-          router.actions.length,
-          "every advertised action is parsed"
+          [...caps!.actions].sort().join(","),
+          router.actions.join(","),
+          "every advertised action, no more and no fewer"
         );
-        assertEqual(
-          caps!.supportsAddAnyPortMapping,
-          router.actions.includes("AddAnyPortMapping"),
-          "v2 flag tracks the action list"
+        for (const [flag, action] of [
+          ["supportsAddAnyPortMapping", "AddAnyPortMapping"],
+          ["supportsDeletePortMappingRange", "DeletePortMappingRange"],
+          ["supportsGetListOfPortMappings", "GetListOfPortMappings"],
+          ["supportsGetSpecificPortMappingEntry", "GetSpecificPortMappingEntry"],
+          ["supportsGetStatusInfo", "GetStatusInfo"],
+        ] as const) {
+          assertEqual(
+            (caps as any)[flag],
+            router.actions.includes(action),
+            `${flag} tracks ${action}`
+          );
+        }
+
+        // Relative URLs resolve against URLBase when the router publishes one,
+        // and against the description URL otherwise.
+        const origin = new URL(router.urlBase ?? DESCRIPTION_URL).origin;
+        assert(
+          caps!.controlURL.startsWith(origin),
+          `controlURL ${caps!.controlURL} should resolve against ${origin}`
         );
 
         assertEqual(await client.getPublicIp(), router.externalIp, "external address");

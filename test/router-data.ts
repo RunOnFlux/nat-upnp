@@ -4,6 +4,14 @@
 
 export interface RouterExpectation {
   slug: string;
+  friendlyName: string;
+  manufacturerURL: string;
+  modelURL: string;
+  presentationURL: string;
+  configId: string | null;
+  urlBase: string | null;
+  wan: { manufacturer: string; modelDescription: string; modelName: string; modelNumber: string } | null;
+  serviceType: string;
   manufacturer: string;
   modelName: string;
   modelNumber: string;
@@ -38,6 +46,19 @@ export interface RouterExpectation {
 export const surveyedRouters: RouterExpectation[] = [
   {
     "slug": "asustek-computer-asus-wireless-router",
+    "friendlyName": "RT-AX3000-3820",
+    "manufacturerURL": "http://www.asus.com/",
+    "modelURL": "http://www.asus.com/",
+    "presentationURL": "http://192.168.1.1:80/",
+    "configId": "1337",
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "MiniUPnP",
+      "modelDescription": "WAN Device",
+      "modelName": "WAN Device",
+      "modelNumber": "20251009"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "ASUSTeK Computer Inc.",
     "modelName": "ASUS Wireless Router",
     "modelNumber": "RT-AX3000",
@@ -82,6 +103,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "asustek-computer-rt-ac68u",
+    "friendlyName": "RT-AC68U-57C8",
+    "manufacturerURL": "http://www.asus.com/",
+    "modelURL": "http://www.asus.com/",
+    "presentationURL": "http://192.168.20.1:80/",
+    "configId": "1337",
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "MiniUPnP",
+      "modelDescription": "WAN Device",
+      "modelName": "WAN Device",
+      "modelNumber": "20250219"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "ASUSTeK Computer Inc.",
     "modelName": "RT-AC68U",
     "modelNumber": "203.0.113.2.386",
@@ -126,6 +160,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "asustek-computer-rt-ax55",
+    "friendlyName": "RT-AX55-E988",
+    "manufacturerURL": "http://www.asus.com/",
+    "modelURL": "http://www.asus.com/",
+    "presentationURL": "http://192.168.50.1:80/",
+    "configId": "1337",
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "MiniUPnP",
+      "modelDescription": "WAN Device",
+      "modelName": "WAN Device",
+      "modelNumber": "20221008"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "ASUSTeK Computer Inc.",
     "modelName": "RT-AX55",
     "modelNumber": "203.0.113.3.386",
@@ -170,6 +217,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "avm-berlin-fritz-box-5690-pro",
+    "friendlyName": "InternetGatewayDeviceV2 - FRITZ!Box 5690 Pro",
+    "manufacturerURL": "https://fritz.com",
+    "modelURL": "https://fritz.com",
+    "presentationURL": "http://192.168.178.1",
+    "configId": null,
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "AVM Berlin",
+      "modelDescription": "WANDevice - FRITZ!Box 5690 Pro",
+      "modelName": "WANDevice - FRITZ!Box 5690 Pro",
+      "modelNumber": "5690avme"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:2",
     "manufacturer": "AVM Berlin",
     "modelName": "FRITZ!Box 5690 Pro",
     "modelNumber": "5690avme",
@@ -228,6 +288,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "avm-berlin-fritz-box-6660-cable",
+    "friendlyName": "InternetGatewayDeviceV2 - FRITZ!Box 6660 Cable",
+    "manufacturerURL": "https://fritz.com",
+    "modelURL": "https://fritz.com",
+    "presentationURL": "http://192.168.54.1",
+    "configId": null,
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "AVM Berlin",
+      "modelDescription": "WANDevice - FRITZ!Box 6660 Cable",
+      "modelName": "WANDevice - FRITZ!Box 6660 Cable",
+      "modelNumber": "6660avm"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:2",
     "manufacturer": "AVM Berlin",
     "modelName": "FRITZ!Box 6660 Cable",
     "modelNumber": "6660avm",
@@ -286,6 +359,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "arcadyan-residential-livebox-gpon-wan-et",
+    "friendlyName": "Orange Livebox",
+    "manufacturerURL": "https://www.arcadyan.com",
+    "modelURL": "",
+    "presentationURL": "http://192.168.1.1",
+    "configId": null,
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "Arcadyan",
+      "modelDescription": "Arcadyan,fr,ARNA-fr-G01.R09.C01_08",
+      "modelName": "Residential Livebox (GPON, WAN Ethernet)",
+      "modelNumber": "4+"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:2",
     "manufacturer": "Arcadyan",
     "modelName": "Residential Livebox (GPON, WAN Ethernet)",
     "modelNumber": "4+",
@@ -340,6 +426,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "arris-group-tg4482a",
+    "friendlyName": "Arris TG4482A",
+    "manufacturerURL": "http://www.arrisi.com/",
+    "modelURL": "http://www.comcast.com",
+    "presentationURL": "http://10.0.0.1/",
+    "configId": null,
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "Arris Group, Inc",
+      "modelDescription": "DOCSIS 3.1 Cable Modem Gateway Device",
+      "modelName": "TG4482A",
+      "modelNumber": "TG4482A"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "Arris Group, Inc",
     "modelName": "TG4482A",
     "modelNumber": "TG4482A",
@@ -385,6 +484,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "askey-rtf8316vw",
+    "friendlyName": "ASP Router",
+    "manufacturerURL": "https://www.askey.com/",
+    "modelURL": "https://www.askey.com/products/",
+    "presentationURL": "http://192.168.1.1/",
+    "configId": "1337",
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "Askey",
+      "modelDescription": "WAN Device",
+      "modelName": "WAN Device",
+      "modelNumber": "1.0"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:2",
     "manufacturer": "Askey",
     "modelName": "RTF8316VW",
     "modelNumber": "1.0",
@@ -429,6 +541,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "buffalo-wsr-1800ax4p",
+    "friendlyName": "BUFFALO WSR-1800AX4P",
+    "manufacturerURL": "http://buffalo.jp",
+    "modelURL": "http://192.168.2.1/",
+    "presentationURL": "http://192.168.2.1/",
+    "configId": null,
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "BUFFALO INC.",
+      "modelDescription": "BUFFALO WSR-1800AX4P 802.11n Router",
+      "modelName": "WSR-1800AX4P",
+      "modelNumber": "20111101"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "BUFFALO INC.",
     "modelName": "WSR-1800AX4P",
     "modelNumber": "F/W Version 1.11",
@@ -474,6 +599,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "bouygues-telecom-sagemcom-fast5330b-r1",
+    "friendlyName": "Bbox",
+    "manufacturerURL": "http://www.bbox.bouyguestelecom.fr",
+    "modelURL": "http://www.bbox.bouyguestelecom.fr",
+    "presentationURL": "http://gestionbbox.lan/",
+    "configId": "1337",
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "MiniUPnP",
+      "modelDescription": "WAN Device",
+      "modelName": "WAN Device",
+      "modelNumber": "20160411"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:2",
     "manufacturer": "Bouygues Telecom",
     "modelName": "SagemCom Fast5330b-r1",
     "modelNumber": "SagemCom Fast5330b-r1",
@@ -521,6 +659,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "bouygues-telecom-sagemcom-f-st5688b",
+    "friendlyName": "Bbox",
+    "manufacturerURL": "http://www.bbox.bouyguestelecom.fr",
+    "modelURL": "http://www.bbox.bouyguestelecom.fr",
+    "presentationURL": "http://gestionbbox.lan/",
+    "configId": "1337",
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "MiniUPnP",
+      "modelDescription": "WAN Device",
+      "modelName": "WAN Device",
+      "modelNumber": "20160411"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:2",
     "manufacturer": "Bouygues Telecom",
     "modelName": "Sagemcom F@st5688b",
     "modelNumber": "Sagemcom F@st5688b",
@@ -568,6 +719,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "bouygues-telecom-sagemcom-f-st5696b",
+    "friendlyName": "Bbox",
+    "manufacturerURL": "http://www.bbox.bouyguestelecom.fr",
+    "modelURL": "http://www.bbox.bouyguestelecom.fr",
+    "presentationURL": "http://gestionbbox.lan/",
+    "configId": "1337",
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "MiniUPnP",
+      "modelDescription": "WAN Device",
+      "modelName": "WAN Device",
+      "modelNumber": "20160411"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:2",
     "manufacturer": "Bouygues Telecom",
     "modelName": "Sagemcom F@st5696b",
     "modelNumber": "Sagemcom F@st5696b",
@@ -615,6 +779,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "cisco-cgm4331com",
+    "friendlyName": "CGM4331COM",
+    "manufacturerURL": "http://www.cisco.com/",
+    "modelURL": "http://www.cisco.com",
+    "presentationURL": "http://10.0.0.1/",
+    "configId": null,
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "Cisco",
+      "modelDescription": "CGM4331COM",
+      "modelName": "CGM4331COM",
+      "modelNumber": "CGM4331COM"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "Cisco",
     "modelName": "CGM4331COM",
     "modelNumber": "CGM4331COM",
@@ -660,6 +837,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "cisco-sg417dbct",
+    "friendlyName": "SG000000T",
+    "manufacturerURL": "http://www.cisco.com/",
+    "modelURL": "http://www.cisco.com",
+    "presentationURL": "http://10.0.0.1/",
+    "configId": null,
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "Cisco",
+      "modelDescription": "SG417DBCT",
+      "modelName": "SG417DBCT",
+      "modelNumber": "SG417DBCT"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "Cisco",
     "modelName": "SG417DBCT",
     "modelNumber": "SG417DBCT",
@@ -705,6 +895,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "d-link-d-link-router",
+    "friendlyName": "DIR-X3260 router",
+    "manufacturerURL": "http://www.dlink.com",
+    "modelURL": "http://www.dlink.com",
+    "presentationURL": "http://192.168.0.1/",
+    "configId": "1337",
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "MiniUPnP",
+      "modelDescription": "WAN Device",
+      "modelName": "WAN Device",
+      "modelNumber": "20210720"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "D-Link Corporation",
     "modelName": "D-Link Router",
     "modelNumber": "DIR-X3260",
@@ -749,6 +952,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "debian-debian-router",
+    "friendlyName": "Debian router",
+    "manufacturerURL": "http://www.debian.org/",
+    "modelURL": "http://www.debian.org/",
+    "presentationURL": "http://192.168.1.210/",
+    "configId": "1337",
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "MiniUPnP",
+      "modelDescription": "WAN Device",
+      "modelName": "WAN Device",
+      "modelNumber": "20221221"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:2",
     "manufacturer": "Debian",
     "modelName": "Debian router",
     "modelNumber": "1",
@@ -796,6 +1012,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "dovado-fz-llc-dovado-router",
+    "friendlyName": "Dovado router",
+    "manufacturerURL": "http://www.dovado.com/",
+    "modelURL": "http://www.dovado.com/",
+    "presentationURL": "http://192.168.1.1/",
+    "configId": null,
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "Dovado FZ-LLC",
+      "modelDescription": "WAN Device",
+      "modelName": "PRO",
+      "modelNumber": "1.0"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "Dovado FZ-LLC",
     "modelName": "Dovado router",
     "modelNumber": "1",
@@ -841,6 +1070,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "fritz-fritz-box-7530-ax",
+    "friendlyName": "InternetGatewayDeviceV2 - FritzBoxunten",
+    "manufacturerURL": "https://fritz.com",
+    "modelURL": "https://fritz.com",
+    "presentationURL": "http://192.168.2.1",
+    "configId": null,
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "FRITZ! GmbH",
+      "modelDescription": "WANDevice - FRITZ!Box 7530 AX",
+      "modelName": "WANDevice - FRITZ!Box 7530 AX",
+      "modelNumber": "7530avm"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:2",
     "manufacturer": "FRITZ! GmbH",
     "modelName": "FRITZ!Box 7530 AX",
     "modelNumber": "7530avm",
@@ -899,6 +1141,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "fritz-fritz-box-7590",
+    "friendlyName": "InternetGatewayDeviceV2 - FRITZ!Box 7590",
+    "manufacturerURL": "https://fritz.com",
+    "modelURL": "https://fritz.com",
+    "presentationURL": "http://192.168.100.1",
+    "configId": null,
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "FRITZ! GmbH",
+      "modelDescription": "WANDevice - FRITZ!Box 7590",
+      "modelName": "WANDevice - FRITZ!Box 7590",
+      "modelNumber": "7590avm"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:2",
     "manufacturer": "FRITZ! GmbH",
     "modelName": "FRITZ!Box 7590",
     "modelNumber": "7590avm",
@@ -952,6 +1207,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "fritz-fritz-box-7590-ax",
+    "friendlyName": "InternetGatewayDeviceV2 - FRITZ!Box 7590 AX",
+    "manufacturerURL": "https://fritz.com",
+    "modelURL": "https://fritz.com",
+    "presentationURL": "http://fritz.box",
+    "configId": null,
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "FRITZ! GmbH",
+      "modelDescription": "WANDevice - FRITZ!Box 7590 AX",
+      "modelName": "WANDevice - FRITZ!Box 7590 AX",
+      "modelNumber": "7590avme"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:2",
     "manufacturer": "FRITZ! GmbH",
     "modelName": "FRITZ!Box 7590 AX",
     "modelNumber": "7590avme",
@@ -1005,6 +1273,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "freebsd-freebsd-router",
+    "friendlyName": "FreeBSD router",
+    "manufacturerURL": "http://www.freebsd.org/",
+    "modelURL": "http://www.freebsd.org/",
+    "presentationURL": "https://192.168.1.1/",
+    "configId": "1337",
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "MiniUPnP",
+      "modelDescription": "WAN Device",
+      "modelName": "WAN Device",
+      "modelNumber": "20230627"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "FreeBSD",
     "modelName": "FreeBSD router",
     "modelNumber": "2.7.0-RELEASE",
@@ -1049,6 +1330,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "freebox-freebox-server",
+    "friendlyName": "Freebox Server",
+    "manufacturerURL": "http://www.freebox.fr/",
+    "modelURL": "http://www.freebox.fr/",
+    "presentationURL": "http://mafreebox.freebox.fr/",
+    "configId": null,
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "Freebox",
+      "modelDescription": "NAS/Modem/Routeur ADSL/FTTH",
+      "modelName": "Freebox Server",
+      "modelNumber": "6"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "Freebox",
     "modelName": "Freebox Server",
     "modelNumber": "6",
@@ -1093,6 +1387,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "keenetic-keenetic-gateway",
+    "friendlyName": "Keenetic Gateway",
+    "manufacturerURL": "https://www.keenetic.com",
+    "modelURL": "https://www.keenetic.com",
+    "presentationURL": "http://192.168.1.1/",
+    "configId": "1337",
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "Keenetic Ltd.",
+      "modelDescription": "WAN Device",
+      "modelName": "WAN Device",
+      "modelNumber": "Keenetic Gateway"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "Keenetic Ltd.",
     "modelName": "Keenetic Gateway",
     "modelNumber": "KN-1912",
@@ -1137,6 +1444,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "mikrotik-router-os",
+    "friendlyName": "MikroTik Router",
+    "manufacturerURL": "https://www.mikrotik.com/",
+    "modelURL": "",
+    "presentationURL": "http://192.168.10.1/",
+    "configId": null,
+    "urlBase": "http://192.168.10.1:2828",
+    "wan": {
+      "manufacturer": "MikroTik",
+      "modelDescription": "",
+      "modelName": "Router OS",
+      "modelNumber": ""
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "MikroTik",
     "modelName": "Router OS",
     "modelNumber": "",
@@ -1181,6 +1501,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "nec-nec-platforms-aterm-series",
+    "friendlyName": "Aterm Series",
+    "manufacturerURL": "",
+    "modelURL": "",
+    "presentationURL": "http://192.168.10.1/",
+    "configId": null,
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "NEC Corporation/NEC Platforms, Ltd.",
+      "modelDescription": "Broadband Router and Wireless Access Point",
+      "modelName": "Aterm Series",
+      "modelNumber": ""
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANPPPConnection:1",
     "manufacturer": "NEC Corporation/NEC Platforms, Ltd.",
     "modelName": "Aterm Series",
     "modelNumber": "",
@@ -1224,6 +1557,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "netgear-netgear-rax30-802-11ax-wireless",
+    "friendlyName": "RAX30 (Gateway)",
+    "manufacturerURL": "http://www.NETGEAR.com",
+    "modelURL": "http://www.netgear.com/home/products/",
+    "presentationURL": "http://www.routerlogin.net/",
+    "configId": null,
+    "urlBase": "http://192.168.1.1:56688/",
+    "wan": {
+      "manufacturer": "NETGEAR",
+      "modelDescription": "Netgear RAX30 802.11ax Wireless Router",
+      "modelName": "Netgear RAX30 802.11ax Wireless Router",
+      "modelNumber": "RAX30"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "NETGEAR",
     "modelName": "Netgear RAX30 802.11ax Wireless Router",
     "modelNumber": "RAX30",
@@ -1268,6 +1614,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "omada-tp-link-er605",
+    "friendlyName": "Omada SMB ER605",
+    "manufacturerURL": "http://www.omadanetworks.com",
+    "modelURL": "http://www.omadanetworks.com",
+    "presentationURL": "http://192.168.222.1:80",
+    "configId": null,
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "Omada by tp-link",
+      "modelDescription": "WAN Device",
+      "modelName": "WAN Device",
+      "modelNumber": "1"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "Omada by tp-link",
     "modelName": "ER605",
     "modelNumber": "2.0",
@@ -1312,6 +1671,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "omada-tp-link-er706w",
+    "friendlyName": "Omada SMB ER706W",
+    "manufacturerURL": "http://www.omadanetworks.com",
+    "modelURL": "http://www.omadanetworks.com",
+    "presentationURL": "http://192.168.5.1:80",
+    "configId": null,
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "Omada by tp-link",
+      "modelDescription": "WAN Device",
+      "modelName": "WAN Device",
+      "modelNumber": "1"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "Omada by tp-link",
     "modelName": "ER706W",
     "modelNumber": "1.0",
@@ -1356,6 +1728,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "omada-tp-link-er707-m2",
+    "friendlyName": "Omada SMB ER707-M2",
+    "manufacturerURL": "http://www.omadanetworks.com",
+    "modelURL": "http://www.omadanetworks.com",
+    "presentationURL": "http://172.16.10.1:80",
+    "configId": null,
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "Omada by tp-link",
+      "modelDescription": "WAN Device",
+      "modelName": "WAN Device",
+      "modelNumber": "1"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "Omada by tp-link",
     "modelName": "ER707-M2",
     "modelNumber": "1.0",
@@ -1400,6 +1785,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "openwrt-openwrt-router",
+    "friendlyName": "OpenWRT router",
+    "manufacturerURL": "http://www.openwrt.org/",
+    "modelURL": "http://www.openwrt.org/",
+    "presentationURL": "http://192.168.100.1/",
+    "configId": "1337",
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "MiniUPnP",
+      "modelDescription": "WAN Device",
+      "modelName": "WAN Device",
+      "modelNumber": "20220517"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "OpenWRT",
     "modelName": "OpenWRT router",
     "modelNumber": "1",
@@ -1447,6 +1845,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "openwrt-openwrt-router-x",
+    "friendlyName": "OpenWrt router",
+    "manufacturerURL": "https://www.openwrt.org/",
+    "modelURL": "https://www.openwrt.org/",
+    "presentationURL": "http://192.168.100.254/",
+    "configId": "1337",
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "MiniUPnP",
+      "modelDescription": "MiniUPnP daemon version 2.3.7",
+      "modelName": "MiniUPnPd",
+      "modelNumber": "20250819"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "OpenWrt",
     "modelName": "OpenWrt router",
     "modelNumber": "1",
@@ -1491,6 +1902,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "sagemcom-fast5670-dt",
+    "friendlyName": "Fast5670 DT",
+    "manufacturerURL": "http://www.sagemcom.com/",
+    "modelURL": "",
+    "presentationURL": "http://home",
+    "configId": null,
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "Sagemcom",
+      "modelDescription": "Sagemcom BCM68360",
+      "modelName": "Sagemcom BCM68360",
+      "modelNumber": "Sagemcom BCM68360"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANPPPConnection:1",
     "manufacturer": "Sagemcom",
     "modelName": "Fast5670 DT",
     "modelNumber": "",
@@ -1536,6 +1960,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "sagemcom-funbox-6-gpon-wan-ethernet",
+    "friendlyName": "Orange Funbox 6",
+    "manufacturerURL": "http://www.sagemcom.com/",
+    "modelURL": "",
+    "presentationURL": "http://192.168.1.1",
+    "configId": null,
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "Sagemcom",
+      "modelDescription": "Sagemcom,pl,SGF6-pl-03.04.13.17_20.04.21.1",
+      "modelName": "Funbox 6, (GPON, WAN Ethernet)",
+      "modelNumber": "6"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANPPPConnection:1",
     "manufacturer": "Sagemcom",
     "modelName": "Funbox 6, (GPON, WAN Ethernet)",
     "modelNumber": "6",
@@ -1591,6 +2028,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "sagemcom-residential-livebox-gpon-wan-et",
+    "friendlyName": "Orange Livebox",
+    "manufacturerURL": "http://www.sagemcom.com/",
+    "modelURL": "",
+    "presentationURL": "http://192.168.1.1",
+    "configId": null,
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "Sagemcom",
+      "modelDescription": "Sagemcom,fr,SGFI-fr-G06.R05.C05_20",
+      "modelName": "Residential Livebox (GPON, WAN Ethernet)",
+      "modelNumber": "5"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:2",
     "manufacturer": "Sagemcom",
     "modelName": "Residential Livebox (GPON, WAN Ethernet)",
     "modelNumber": "5",
@@ -1645,6 +2095,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "sercomm-residential-livebox-gpon-wan-eth",
+    "friendlyName": "Orange Livebox",
+    "manufacturerURL": "http://www.sercomm.com/",
+    "modelURL": "",
+    "presentationURL": "http://192.168.1.1",
+    "configId": null,
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "Sercomm",
+      "modelDescription": "Sercomm,fr,SR60-fr-G07.R05.C01_36",
+      "modelName": "Residential Livebox (GPON, WAN Ethernet)",
+      "modelNumber": "4+"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:2",
     "manufacturer": "Sercomm",
     "modelName": "Residential Livebox (GPON, WAN Ethernet)",
     "modelNumber": "4+",
@@ -1699,6 +2162,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "synology-synology-srm",
+    "friendlyName": "Synology SRM",
+    "manufacturerURL": "http://www.synology.com/",
+    "modelURL": "http://www.synology.com/",
+    "presentationURL": "http://192.168.25.254:8000",
+    "configId": "1337",
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "MiniUPnP",
+      "modelDescription": "WAN Device",
+      "modelName": "WAN Device",
+      "modelNumber": "20160503"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "Synology Inc.",
     "modelName": "Synology SRM",
     "modelNumber": "1.3",
@@ -1743,6 +2219,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "tp-link-be65",
+    "friendlyName": "BE65",
+    "manufacturerURL": "http://www.tp-link.com/",
+    "modelURL": "http://www.tp-link.com/",
+    "presentationURL": "http://192.168.68.1/",
+    "configId": "1337",
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "MiniUPnP",
+      "modelDescription": "WAN Device",
+      "modelName": "WAN Device",
+      "modelNumber": "20260409"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "TP-LINK",
     "modelName": "BE65",
     "modelNumber": "1.0",
@@ -1787,6 +2276,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "tp-link-m5",
+    "friendlyName": "M5",
+    "manufacturerURL": "http://www.tp-link.com/",
+    "modelURL": "http://www.tp-link.com/",
+    "presentationURL": "http://192.168.1.1/",
+    "configId": "1337",
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "MiniUPnP",
+      "modelDescription": "WAN Device",
+      "modelName": "WAN Device",
+      "modelNumber": "20250909"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "TP-LINK",
     "modelName": "M5",
     "modelNumber": "1.0",
@@ -1831,6 +2333,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "tp-link-archer-ax10",
+    "friendlyName": "Archer AX10",
+    "manufacturerURL": "http://www.tp-link.com/",
+    "modelURL": "http://www.tp-link.com/",
+    "presentationURL": "http://192.168.0.1/",
+    "configId": null,
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "MiniUPnP",
+      "modelDescription": "WAN Device",
+      "modelName": "WAN Device",
+      "modelNumber": "20240130"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "TP-Link",
     "modelName": "Archer AX10",
     "modelNumber": "1.20",
@@ -1875,6 +2390,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "tp-link-archer-ax1800",
+    "friendlyName": "Archer AX1800",
+    "manufacturerURL": "http://www.tp-link.com/",
+    "modelURL": "http://www.tp-link.com/",
+    "presentationURL": "http://192.168.0.1/",
+    "configId": null,
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "MiniUPnP",
+      "modelDescription": "WAN Device",
+      "modelName": "WAN Device",
+      "modelNumber": "20211231"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "TP-Link",
     "modelName": "Archer AX1800",
     "modelNumber": "1.20",
@@ -1919,6 +2447,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "tp-link-archer-ax20",
+    "friendlyName": "Archer AX20",
+    "manufacturerURL": "http://www.tp-link.com/",
+    "modelURL": "http://www.tp-link.com/",
+    "presentationURL": "http://192.168.0.1/",
+    "configId": null,
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "MiniUPnP",
+      "modelDescription": "WAN Device",
+      "modelName": "WAN Device",
+      "modelNumber": "20240809"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "TP-Link",
     "modelName": "Archer AX20",
     "modelNumber": "3.0",
@@ -1963,6 +2504,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "tp-link-archer-ax55",
+    "friendlyName": "Archer AX55",
+    "manufacturerURL": "http://www.tp-link.com/",
+    "modelURL": "http://www.tp-link.com/",
+    "presentationURL": "http://192.168.0.1/",
+    "configId": "1337",
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "MiniUPnP",
+      "modelDescription": "WAN Device",
+      "modelName": "WAN Device",
+      "modelNumber": "20251119"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "TP-Link",
     "modelName": "Archer AX55",
     "modelNumber": "1",
@@ -2007,6 +2561,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "tp-link-archer-ax72",
+    "friendlyName": "Archer AX72",
+    "manufacturerURL": "http://www.tp-link.com/",
+    "modelURL": "http://www.tp-link.com/",
+    "presentationURL": "http://192.168.1.1/",
+    "configId": "1337",
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "MiniUPnP",
+      "modelDescription": "WAN Device",
+      "modelName": "WAN Device",
+      "modelNumber": "20250724"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "TP-Link",
     "modelName": "Archer AX72",
     "modelNumber": "1.0",
@@ -2051,6 +2618,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "tp-link-archer-c2300",
+    "friendlyName": "Archer C2300",
+    "manufacturerURL": "http://www.tp-link.com/",
+    "modelURL": "http://www.tp-link.com/",
+    "presentationURL": "http://192.168.5.1/",
+    "configId": null,
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "MiniUPnP",
+      "modelDescription": "WAN Device",
+      "modelName": "WAN Device",
+      "modelNumber": "20210705"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "TP-Link",
     "modelName": "Archer C2300",
     "modelNumber": "1.0",
@@ -2095,6 +2675,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "tp-link-archer-ge800",
+    "friendlyName": "Archer GE800",
+    "manufacturerURL": "http://www.tp-link.com/",
+    "modelURL": "http://www.tp-link.com/",
+    "presentationURL": "http://192.168.1.1/",
+    "configId": "1337",
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "MiniUPnP",
+      "modelDescription": "WAN Device",
+      "modelName": "WAN Device",
+      "modelNumber": "20260210"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "TP-Link",
     "modelName": "Archer GE800",
     "modelNumber": "1",
@@ -2139,6 +2732,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "tp-link-archer-vr2100v",
+    "friendlyName": "Archer_VR2100v",
+    "manufacturerURL": "http://www.tp-link.com",
+    "modelURL": "http://192.168.1.1:80/",
+    "presentationURL": "http://192.168.1.1:80/",
+    "configId": null,
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "TP-Link",
+      "modelDescription": "AC2100 Wireless MU-MIMO VDSL/ADSL Modem Router",
+      "modelName": "Archer_VR2100v",
+      "modelNumber": "1.20"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "TP-Link",
     "modelName": "Archer_VR2100v",
     "modelNumber": "1.20",
@@ -2183,6 +2789,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "tp-link-er605",
+    "friendlyName": "TP-Link SMB ER605",
+    "manufacturerURL": "http://www.tp-link.com",
+    "modelURL": "",
+    "presentationURL": "http://192.168.5.1:80",
+    "configId": null,
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "TP-Link",
+      "modelDescription": "WAN Device",
+      "modelName": "WAN Device",
+      "modelNumber": "1"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "TP-Link",
     "modelName": "ER605",
     "modelNumber": "2.20",
@@ -2227,6 +2846,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "tp-link-tl-r470t",
+    "friendlyName": "TP-Link SMB TL-R470T+",
+    "manufacturerURL": "http://www.tp-link.com",
+    "modelURL": "",
+    "presentationURL": "http://192.168.4.1:80",
+    "configId": null,
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "TP-Link",
+      "modelDescription": "WAN Device",
+      "modelName": "WAN Device",
+      "modelNumber": "1"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "TP-Link",
     "modelName": "TL-R470T+",
     "modelNumber": "6.0",
@@ -2271,6 +2903,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "ubiquiti-ucgf",
+    "friendlyName": "UniFi Dream Machine",
+    "manufacturerURL": "http://ui.com",
+    "modelURL": "http://ui.com",
+    "presentationURL": "http://192.168.1.1/",
+    "configId": "1337",
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "MiniUPnP",
+      "modelDescription": "MiniUPnP daemon version 2.3.8",
+      "modelName": "MiniUPnPd",
+      "modelNumber": "20260326"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:2",
     "manufacturer": "Ubiquiti Networks",
     "modelName": "UCGF",
     "modelNumber": "0028fc16",
@@ -2318,6 +2963,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "ubiquiti-ucgmax",
+    "friendlyName": "UniFi Dream Machine",
+    "manufacturerURL": "http://ui.com",
+    "modelURL": "http://ui.com",
+    "presentationURL": "http://192.168.2.1/",
+    "configId": "1337",
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "MiniUPnP",
+      "modelDescription": "MiniUPnP daemon version 2.3.8",
+      "modelName": "MiniUPnPd",
+      "modelNumber": "20260326"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:2",
     "manufacturer": "Ubiquiti Networks",
     "modelName": "UCGMAX",
     "modelNumber": "00288d10",
@@ -2365,6 +3023,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "ubiquiti-udm-ent",
+    "friendlyName": "UniFi Dream Machine",
+    "manufacturerURL": "http://ui.com",
+    "modelURL": "http://ui.com",
+    "presentationURL": "http://10.61.0.1/",
+    "configId": "1337",
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "MiniUPnP",
+      "modelDescription": "MiniUPnP daemon version 2.3.8",
+      "modelName": "MiniUPnPd",
+      "modelNumber": "20260326"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:2",
     "manufacturer": "Ubiquiti Networks",
     "modelName": "UDM-ENT",
     "modelNumber": "00044c1d",
@@ -2412,6 +3083,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "ubiquiti-udm-pro",
+    "friendlyName": "UniFi Dream Machine",
+    "manufacturerURL": "http://ui.com",
+    "modelURL": "http://ui.com",
+    "presentationURL": "http://192.168.7.1/",
+    "configId": "1337",
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "MiniUPnP",
+      "modelDescription": "MiniUPnP daemon version 2.3.8",
+      "modelName": "MiniUPnPd",
+      "modelNumber": "20260326"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:2",
     "manufacturer": "Ubiquiti Networks",
     "modelName": "UDM-Pro",
     "modelNumber": "0002d30a",
@@ -2459,6 +3143,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "ubiquiti-udm-pro-max",
+    "friendlyName": "UniFi Dream Machine",
+    "manufacturerURL": "http://ui.com",
+    "modelURL": "http://ui.com",
+    "presentationURL": "http://10.10.0.1/",
+    "configId": "1337",
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "MiniUPnP",
+      "modelDescription": "MiniUPnP daemon version 2.3.8",
+      "modelName": "MiniUPnPd",
+      "modelNumber": "20260326"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:2",
     "manufacturer": "Ubiquiti Networks",
     "modelName": "UDM-Pro-Max",
     "modelNumber": "00253c14",
@@ -2506,6 +3203,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "ubiquiti-udm-se",
+    "friendlyName": "UniFi Dream Machine",
+    "manufacturerURL": "http://ui.com",
+    "modelURL": "http://ui.com",
+    "presentationURL": "http://192.168.1.1/",
+    "configId": "1337",
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "MiniUPnP",
+      "modelDescription": "MiniUPnP daemon version 2.3.8",
+      "modelName": "MiniUPnPd",
+      "modelNumber": "20260326"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:2",
     "manufacturer": "Ubiquiti Networks",
     "modelName": "UDM-SE",
     "modelNumber": "0003952a",
@@ -2553,6 +3263,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "ubiquiti-udr",
+    "friendlyName": "UniFi Dream Machine",
+    "manufacturerURL": "http://ui.com",
+    "modelURL": "http://ui.com",
+    "presentationURL": "http://192.168.30.1/",
+    "configId": "1337",
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "MiniUPnP",
+      "modelDescription": "MiniUPnP daemon version 2.3.8",
+      "modelName": "MiniUPnPd",
+      "modelNumber": "20260326"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:2",
     "manufacturer": "Ubiquiti Networks",
     "modelName": "UDR",
     "modelNumber": "00031220",
@@ -2600,6 +3323,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "ubiquiti-udrult",
+    "friendlyName": "UniFi Dream Machine",
+    "manufacturerURL": "http://ui.com",
+    "modelURL": "http://ui.com",
+    "presentationURL": "http://192.168.0.3/",
+    "configId": "1337",
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "MiniUPnP",
+      "modelDescription": "MiniUPnP daemon version 2.3.8",
+      "modelName": "MiniUPnPd",
+      "modelNumber": "20260326"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:2",
     "manufacturer": "Ubiquiti Networks",
     "modelName": "UDRULT",
     "modelNumber": "001de316",
@@ -2647,6 +3383,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "ubiquiti-debian-router",
+    "friendlyName": "ER-4",
+    "manufacturerURL": "http://www.ubnt.com",
+    "modelURL": "http://www.debian.org/",
+    "presentationURL": "http://192.168.30.1/",
+    "configId": "1337",
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "MiniUPnP",
+      "modelDescription": "WAN Device",
+      "modelName": "WAN Device",
+      "modelNumber": "20250718"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "Ubiquiti Networks, Inc.",
     "modelName": "Debian router",
     "modelNumber": "e300",
@@ -2691,9 +3440,22 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "yamaha-rtx810",
+    "friendlyName": "YAMAHA RTX810",
+    "manufacturerURL": "http://www.rtpro.yamaha.co.jp",
+    "modelURL": "",
+    "presentationURL": "http://192.168.0.1",
+    "configId": null,
+    "urlBase": "http://192.168.0.1:2869",
+    "wan": {
+      "manufacturer": "YAMAHA Corporation",
+      "modelDescription": "Remote router",
+      "modelName": "RTX810",
+      "modelNumber": ""
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "YAMAHA Corporation",
     "modelName": "RTX810",
-    "modelNumber": "1",
+    "modelNumber": "",
     "modelDescription": "Remote router",
     "specMajor": 1,
     "specMinor": 0,
@@ -2735,6 +3497,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "eero-eero-pro-7",
+    "friendlyName": "eero",
+    "manufacturerURL": "https://eero.com",
+    "modelURL": "",
+    "presentationURL": "https://eero.com",
+    "configId": null,
+    "urlBase": "http://192.168.4.1:1900/",
+    "wan": {
+      "manufacturer": "eero inc.",
+      "modelDescription": "eero",
+      "modelName": "eero Pro 7",
+      "modelNumber": "0.0.1"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "eero inc.",
     "modelName": "eero Pro 7",
     "modelNumber": "0.0.1",
@@ -2779,6 +3554,19 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "neufbox-neufbox-router",
+    "friendlyName": "neufbox router",
+    "manufacturerURL": "http://efixo.com",
+    "modelURL": "http://efixo.com",
+    "presentationURL": "http://192.168.1.1/",
+    "configId": null,
+    "urlBase": null,
+    "wan": {
+      "manufacturer": "MiniUPnP",
+      "modelDescription": "WAN Device",
+      "modelName": "WAN Device",
+      "modelNumber": "20251126"
+    },
+    "serviceType": "urn:schemas-upnp-org:service:WANIPConnection:1",
     "manufacturer": "neufbox",
     "modelName": "neufbox router",
     "modelNumber": "1",

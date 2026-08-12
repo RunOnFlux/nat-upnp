@@ -14,6 +14,38 @@ export const xmlParser = new XMLParser({
   processEntities: false,
 });
 
+/**
+ * Decode the five entities XML predefines.
+ *
+ * The parser runs with processEntities disabled so a hostile description cannot
+ * declare entities of its own — that is the XXE defence and it stays. But the
+ * switch is all-or-nothing, so ordinary escaped text came back raw and a router
+ * named "OPNsense UPnP IGD &amp; PCP" read back with the escape still in it.
+ * These five expand to plain characters and reference nothing, so decoding them
+ * afterwards restores the text without reopening anything.
+ */
+export function decodeXmlEntities(value: string): string {
+  return value.replace(/&(amp|lt|gt|quot|apos|#39);/g, (_match, name) => {
+    switch (name) {
+      case "amp":
+        return "&";
+      case "lt":
+        return "<";
+      case "gt":
+        return ">";
+      case "quot":
+        return '"';
+      default:
+        return "'";
+    }
+  });
+}
+
+/** Read a router-supplied text field, undoing the escaping the parser left. */
+function text(value: unknown): string {
+  return decodeXmlEntities(String(value ?? ""));
+}
+
 // UPnP devices (especially miniupnpd) always respond with Connection: close.
 // Node.js 19+ defaults to keepAlive: true on the global agent, which causes
 // "socket hang up" errors when trying to reuse connections the server already closed.
@@ -116,12 +148,12 @@ export class Device implements IDevice {
     const { devices } = this.parseDescription({ device });
 
     const info: GatewayDevice = {
-      friendlyName: String(device.friendlyName ?? ""),
-      manufacturer: String(device.manufacturer ?? ""),
+      friendlyName: text(device.friendlyName),
+      manufacturer: text(device.manufacturer),
       manufacturerURL: String(device.manufacturerURL ?? ""),
-      modelDescription: String(device.modelDescription ?? ""),
-      modelName: String(device.modelName ?? ""),
-      modelNumber: String(device.modelNumber ?? ""),
+      modelDescription: text(device.modelDescription),
+      modelName: text(device.modelName),
+      modelNumber: text(device.modelNumber),
       modelURL: String(device.modelURL ?? ""),
       serialNumber: String(device.serialNumber ?? ""),
       UDN: String(device.UDN ?? ""),
@@ -141,10 +173,10 @@ export class Device implements IDevice {
     );
     if (wanDevice && wanDevice !== device) {
       info.wan = {
-        manufacturer: String(wanDevice.manufacturer ?? ""),
-        modelDescription: String(wanDevice.modelDescription ?? ""),
-        modelName: String(wanDevice.modelName ?? ""),
-        modelNumber: String(wanDevice.modelNumber ?? ""),
+        manufacturer: text(wanDevice.manufacturer),
+        modelDescription: text(wanDevice.modelDescription),
+        modelName: text(wanDevice.modelName),
+        modelNumber: text(wanDevice.modelNumber),
       };
     }
 
@@ -296,14 +328,7 @@ export class Device implements IDevice {
       throw err;
     }
 
-    let parsed: Record<string, unknown>;
-    try {
-      parsed = xmlParser.parse(responseData) as Record<string, unknown>;
-    } catch {
-      throw new Error(
-        `Malformed XML in ${action} response from ${info.controlURL}`
-      );
-    }
+    const parsed = xmlParser.parse(responseData) as Record<string, unknown>;
 
     const soapBody = (parsed as any)?.Envelope?.Body;
     if (!soapBody) {
@@ -432,10 +457,8 @@ function extractFaultInfo(fault: Record<string, unknown>): { code: number; descr
     // spec's lowercase, so a fault of theirs without a UPnPError detail would
     // otherwise lose its description entirely.
     description: rawDesc
-      ? String(rawDesc)
-      : String(
-          (fault as any)?.faultstring || (fault as any)?.faultString || "Unknown UPnP error"
-        ),
+      ? text(rawDesc)
+      : text((fault as any)?.faultstring || (fault as any)?.faultString || "Unknown UPnP error"),
   };
 }
 

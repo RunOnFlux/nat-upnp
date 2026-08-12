@@ -2,7 +2,7 @@ import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { XMLParser } from "fast-xml-parser";
 import axiosModule from "axios";
-import { UpnpError } from "../src/nat-upnp/device";
+import { UpnpError, decodeXmlEntities } from "../src/nat-upnp/device";
 import { Device } from "../src/nat-upnp/device";
 import { Client } from "../src/nat-upnp/client";
 import { parseMimeHeader, Ssdp, type SsdpEmitter } from "../src/nat-upnp/ssdp";
@@ -1097,11 +1097,9 @@ function getSoapFaultCode(xml: string): number | null {
       specVersion: { major: number; minor: number };
     }
   > = {
-    // friendlyName arrives still escaped: the parser runs with
-    // processEntities: false for XXE protection, which also leaves the five
-    // predefined character entities undecoded. Any router with & < > " ' in a
-    // text field reads back escaped.
-    opnsense: { friendlyName: "OPNsense UPnP IGD &amp; PCP", manufacturer: "FreeBSD", modelName: "FreeBSD router", modelNumber: "26.1.3", modelDescription: "FreeBSD with MiniUPnPd version 2.3.9 router", specVersion: { major: 1, minor: 1 } },
+    // The parser keeps processEntities off for XXE protection, so the five
+    // predefined entities are decoded afterwards instead.
+    opnsense: { friendlyName: "OPNsense UPnP IGD & PCP", manufacturer: "FreeBSD", modelName: "FreeBSD router", modelNumber: "26.1.3", modelDescription: "FreeBSD with MiniUPnPd version 2.3.9 router", specVersion: { major: 1, minor: 1 } },
     "pfsense-2.7": { friendlyName: "FreeBSD router", manufacturer: "FreeBSD", modelName: "FreeBSD router", modelNumber: "2.7.2-RELEASE", modelDescription: "FreeBSD router", specVersion: { major: 1, minor: 1 } },
     "pfsense-2.8": { friendlyName: "FreeBSD router", manufacturer: "FreeBSD", modelName: "FreeBSD router", modelNumber: "2.8.1-RELEASE", modelDescription: "FreeBSD with MiniUPnPd version 2.3.7 router", specVersion: { major: 1, minor: 1 } },
     "asus-rt-ax55": { friendlyName: "RT-AX55-0001", manufacturer: "ASUSTeK Computer Inc.", modelName: "ASUS Wireless Router", modelNumber: "RT-AX55", modelDescription: "ASUS Wireless Router", specVersion: { major: 1, minor: 1 } },
@@ -1299,6 +1297,28 @@ function getSoapFaultCode(xml: string): number | null {
       client.close();
       restore();
     }
+  });
+
+  await test("the five predefined XML entities are decoded", () => {
+    assertEqual(decodeXmlEntities("a &amp; b"), "a & b", "amp");
+    assertEqual(decodeXmlEntities("&lt;tag&gt;"), "<tag>", "lt/gt");
+    assertEqual(decodeXmlEntities("&quot;quoted&quot;"), '"quoted"', "quot");
+    assertEqual(decodeXmlEntities("it&apos;s"), "it's", "apos");
+    assertEqual(decodeXmlEntities("it&#39;s"), "it's", "numeric apostrophe");
+  });
+
+  await test("entity decoding leaves anything else untouched", () => {
+    // Only the predefined five are expanded. A declared entity is exactly what
+    // processEntities is off to prevent, so it must survive as written.
+    assertEqual(decodeXmlEntities("&xxe;"), "&xxe;", "custom entity is not expanded");
+    assertEqual(decodeXmlEntities("&amp"), "&amp", "an unterminated entity is left alone");
+    assertEqual(decodeXmlEntities("plain text"), "plain text", "plain text");
+    assertEqual(decodeXmlEntities(""), "", "empty string");
+  });
+
+  await test("decoding does not re-expand what it just produced", () => {
+    // "&amp;lt;" means the literal text "&lt;", not a less-than sign.
+    assertEqual(decodeXmlEntities("&amp;lt;"), "&lt;", "single pass only");
   });
 
   // ========================================

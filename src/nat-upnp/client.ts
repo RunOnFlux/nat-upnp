@@ -4,6 +4,7 @@ import Device, {
   ServiceCapabilities,
   UpnpError,
   decodeXmlEntities,
+  fieldValue,
   xmlParser,
 } from "./device";
 import Ssdp from "./ssdp";
@@ -193,14 +194,14 @@ export class Client implements IClient {
     const res = findResponseKey(data, "GetSpecificPortMappingEntryResponse");
     if (!res) throw new Error("Incorrect response for GetSpecificPortMappingEntry");
 
-    const host = String(res.NewInternalClient ?? "");
+    const host = fieldValue(res.NewInternalClient);
     return {
       public: { host: options.remoteHost ?? "", port: Number(options.public) },
-      private: { host, port: parseInt(res.NewInternalPort, 10) || 0 },
+      private: { host, port: parseInt(fieldValue(res.NewInternalPort), 10) || 0 },
       protocol: protocol.toLowerCase(),
-      enabled: res.NewEnabled === 1 || res.NewEnabled === "1",
-      description: String(res.NewPortMappingDescription ?? ""),
-      ttl: parseInt(res.NewLeaseDuration, 10) || 0,
+      enabled: fieldValue(res.NewEnabled) === "1",
+      description: fieldValue(res.NewPortMappingDescription),
+      ttl: parseInt(fieldValue(res.NewLeaseDuration), 10) || 0,
       local: host === localAddress,
     };
   }
@@ -213,9 +214,9 @@ export class Client implements IClient {
     if (!res) throw new Error("Incorrect response for GetStatusInfo");
 
     return {
-      connectionStatus: String(res.NewConnectionStatus ?? ""),
-      lastConnectionError: String(res.NewLastConnectionError ?? ""),
-      uptime: parseInt(res.NewUptime, 10) || 0,
+      connectionStatus: fieldValue(res.NewConnectionStatus),
+      lastConnectionError: fieldValue(res.NewLastConnectionError),
+      uptime: parseInt(fieldValue(res.NewUptime), 10) || 0,
     };
   }
 
@@ -226,7 +227,7 @@ export class Client implements IClient {
     const res = findResponseKey(data, "GetExternalIPAddressResponse");
     if (!res) throw new Error("Incorrect response for GetExternalIPAddress");
 
-    return String(res.NewExternalIPAddress ?? "");
+    return fieldValue(res.NewExternalIPAddress);
   }
 
   /**
@@ -254,7 +255,7 @@ export class Client implements IClient {
     const res = findResponseKey(data, "AddAnyPortMappingResponse");
     if (!res) throw new Error("Incorrect response for AddAnyPortMapping");
 
-    return { reservedPort: parseInt(res.NewReservedPort, 10) || 0 };
+    return { reservedPort: parseInt(fieldValue(res.NewReservedPort), 10) || 0 };
   }
 
   public async removeMappingRange(options: DeleteMappingRangeOpts): Promise<RawResponse> {
@@ -287,30 +288,30 @@ export class Client implements IClient {
     const res = findResponseKey(data, "GetListOfPortMappingsResponse");
     if (!res) throw new Error("Incorrect response for GetListOfPortMappings");
 
-    const portListing = res.NewPortListing;
+    const portListing = fieldValue(res.NewPortListing);
     if (!portListing) return [];
 
     // NewPortListing carries an XML document inside a string, so it arrives
     // escaped. The shared parser leaves entities alone for XXE protection, so
     // without decoding first the inner parse finds no elements and every router
     // looks like it has no mappings at all.
-    const parsed = xmlParser.parse(decodeXmlEntities(String(portListing)));
+    const parsed = xmlParser.parse(decodeXmlEntities(portListing));
     const list = parsed?.PortMappingList?.PortMappingEntry;
     if (!list) return [];
 
     const entries = Array.isArray(list) ? list : [list];
     return entries.map((entry: any) => {
-      const host = String(entry.NewInternalClient ?? "");
+      const host = fieldValue(entry.NewInternalClient);
       return {
         public: {
-          host: String(entry.NewRemoteHost ?? ""),
-          port: parseInt(entry.NewExternalPort, 10) || 0,
+          host: fieldValue(entry.NewRemoteHost),
+          port: parseInt(fieldValue(entry.NewExternalPort), 10) || 0,
         },
-        private: { host, port: parseInt(entry.NewInternalPort, 10) || 0 },
+        private: { host, port: parseInt(fieldValue(entry.NewInternalPort), 10) || 0 },
         protocol: protocol.toLowerCase(),
-        enabled: entry.NewEnabled === "1" || entry.NewEnabled === 1,
-        description: String(entry.NewDescription ?? ""),
-        ttl: parseInt(entry.NewLeaseTime, 10) || 0,
+        enabled: fieldValue(entry.NewEnabled) === "1",
+        description: fieldValue(entry.NewDescription),
+        ttl: parseInt(fieldValue(entry.NewLeaseTime), 10) || 0,
         local: host === localAddress,
       };
     });
@@ -438,17 +439,17 @@ function normalizeOptions(options: StandardOpts) {
 }
 
 function parseMapping(res: any, localAddress: string): Mapping {
-  const host = String(res.NewInternalClient ?? "");
+  const host = fieldValue(res.NewInternalClient);
   return {
     public: {
-      host: typeof res.NewRemoteHost === "string" ? res.NewRemoteHost : "",
-      port: parseInt(res.NewExternalPort, 10) || 0,
+      host: fieldValue(res.NewRemoteHost),
+      port: parseInt(fieldValue(res.NewExternalPort), 10) || 0,
     },
-    private: { host, port: parseInt(res.NewInternalPort, 10) || 0 },
-    protocol: res.NewProtocol ? String(res.NewProtocol).toLowerCase() : "tcp",
-    enabled: res.NewEnabled === "1" || res.NewEnabled === 1,
-    description: String(res.NewPortMappingDescription ?? ""),
-    ttl: parseInt(res.NewLeaseDuration, 10) || 0,
+    private: { host, port: parseInt(fieldValue(res.NewInternalPort), 10) || 0 },
+    protocol: fieldValue(res.NewProtocol) ? fieldValue(res.NewProtocol).toLowerCase() : "tcp",
+    enabled: fieldValue(res.NewEnabled) === "1",
+    description: fieldValue(res.NewPortMappingDescription),
+    ttl: parseInt(fieldValue(res.NewLeaseDuration), 10) || 0,
     local: host === localAddress,
   };
 }

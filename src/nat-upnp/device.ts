@@ -41,9 +41,27 @@ export function decodeXmlEntities(value: string): string {
   });
 }
 
+/**
+ * Read a value out of a parsed response.
+ *
+ * A router may attach attributes to a value element — the YAMAHA RTX810 tags
+ * its results with Microsoft datatype attributes — and the parser then returns
+ * an object with the value under `#text` rather than a bare string. Coercing
+ * that with String() yields "[object Object]", so the text has to be reached
+ * for explicitly.
+ */
+export function fieldValue(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "object") {
+    const text = (value as Record<string, unknown>)["#text"];
+    return text === undefined || text === null ? "" : String(text);
+  }
+  return String(value);
+}
+
 /** Read a router-supplied text field, undoing the escaping the parser left. */
 function text(value: unknown): string {
-  return decodeXmlEntities(String(value ?? ""));
+  return decodeXmlEntities(fieldValue(value));
 }
 
 // UPnP devices (especially miniupnpd) always respond with Connection: close.

@@ -12,6 +12,7 @@ export const xmlParser = new XMLParser({
   removeNSPrefix: true,
   ignoreAttributes: false,
   processEntities: false,
+  parseTagValue: false,
 });
 
 /**

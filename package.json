@@ -1,17 +1,22 @@
 {
-  "name": "@megachips/nat-upnp",
-  "version": "2.0.2",
+  "name": "@runonflux/nat-upnp",
+  "version": "2.0.0",
   "main": "build/src/index.js",
   "types": "build/src/index.d.ts",
   "files": [
     "build/src"
   ],
   "author": "RunOnFlux",
+  "contributors": [
+    "Fedor Indutny <fedor@indutny.com>",
+    "SimplyLinn <https://github.com/SimplyLinn>",
+    "Kaden Sharpin <http://github.com/kaden-sharpin>"
+  ],
   "homepage": "https://github.com/RunOnFlux/nat-upnp",
   "license": "BlueOak-1.0.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/MorningLightMountain713/nat-upnp.git"
+    "url": "https://github.com/RunOnFlux/nat-upnp.git"
   },
   "scripts": {
     "build": "tsc",

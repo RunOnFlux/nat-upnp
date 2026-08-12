@@ -53,7 +53,8 @@ export type Breakage =
   | "transport" // socket died mid-request
   | "malformed" // 200 carrying XML that will not parse
   | "empty-500" // HTTP error with no SOAP fault body to unwrap
-  | "non-error"; // something thrown that is not an Error at all
+  | "non-error" // something thrown that is not an Error at all
+  | "first-index-401"; // the action itself is refused, from the very first call
 
 /** Every SOAP request the client built during the active install. */
 export const requests: { action: string; body: string; headers: Record<string, string> }[] = [];
@@ -91,6 +92,18 @@ export function installFakeRouter(router: string, breakage?: Breakage): () => vo
         throw { response: { data: "<html>502 Bad Gateway</html>", status: 502 } };
       case "non-error":
         throw "router said no";
+      case "first-index-401":
+        throw {
+          response: {
+            data:
+              '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>' +
+              "<s:Fault><faultcode>s:Client</faultcode><faultstring>UPnPError</faultstring>" +
+              '<detail><UPnPError xmlns="urn:schemas-upnp-org:control-1-0">' +
+              "<errorCode>401</errorCode><errorDescription>Invalid Action</errorDescription>" +
+              "</UPnPError></detail></s:Fault></s:Body></s:Envelope>",
+            status: 500,
+          },
+        };
     }
 
     const xml = loadFixture(fixtureFor(router, action, body));

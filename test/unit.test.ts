@@ -860,7 +860,6 @@ function getSoapFaultCode(xml: string): number | null {
   }
 
   for (const router of routers) {
-    if (router === "mikrotik") continue; // ends the walk with 402 — asserted separately
     await test(`${router}: getMappings walks the table and stops at end-of-list`, async () => {
       const expected = expectedGenericEntry[router];
       const mappings = await withRouter(router, (c) => c.getMappings());
@@ -904,13 +903,22 @@ function getSoapFaultCode(xml: string): number | null {
   // as "absent". Both currently propagate instead of resolving empty, so these
   // pin the behaviour that exists — see the gaps noted alongside them.
 
-  await test("mikrotik: end-of-list arrives as 402, which getMappings does not absorb", async () => {
-    // Every other router ends the walk with 713. MikroTik sends 402 Invalid Args,
-    // which is not in the break set, so the whole listing throws.
+  await test("mikrotik: a 402 end-of-list still yields the listing", async () => {
+    // MikroTik ends the walk with 402 Invalid Args rather than 713. Past the
+    // first index any UPnP fault means the table ran out, so the entries read
+    // before it are returned instead of the listing throwing.
+    const mappings = await withRouter("mikrotik", (c) => c.getMappings());
+    assertEqual(mappings.length, 1, "the captured entry survives the 402");
+    assertEqual(mappings[0].description, "Dummy inactive rule for windows to work");
+  });
+
+  await test("a fault at the very first index is not mistaken for an empty table", async () => {
+    // 713/714 at index 0 mean "no mappings". Anything else there is a real
+    // problem -- an unsupported action, say -- and must not be swallowed.
     await expectUpnpError(
-      withRouter("mikrotik", (c) => c.getMappings()),
-      402,
-      "mikrotik getMappings"
+      withBroken("first-index-401", (c) => c.getMappings()),
+      401,
+      "getMappings when the action is unsupported"
     );
   });
 
@@ -1048,7 +1056,6 @@ function getSoapFaultCode(xml: string): number | null {
   for (const router of routers) {
     await test(`${router}: getMappings honours the description filter`, async () => {
       const expected = expectedGenericEntry[router];
-      if (router === "mikrotik") return; // walk ends on 402, covered separately
       const matched = await withRouter(router, (c) =>
         c.getMappings({ description: expected.description })
       );
@@ -1423,24 +1430,21 @@ function getSoapFaultCode(xml: string): number | null {
     });
   });
 
-  await test("concurrent searches before bind open a second socket that close never releases", async () => {
-    // ensureSocket only stores the socket once the bind lands, so a second
-    // search arriving in that window creates another one. The later bind then
-    // overwrites the stored reference, and close releases that one -- leaving
-    // the socket actually carrying the traffic open. This pins the behaviour as
-    // it stands; it is a leak, not a design.
+  await test("concurrent searches before bind share one socket, and close releases it", async () => {
+    // The socket is stored before the bind resolves, so a search arriving in
+    // that window queues rather than opening a second socket. Previously the
+    // later bind overwrote the reference and close freed the idle one, leaving
+    // the socket carrying traffic open.
     const fake = installFakeDgram();
     const ssdp = new Ssdp();
     try {
       ssdp.search(IGD);
       ssdp.search("urn:schemas-upnp-org:device:MediaServer:1");
       await settle();
-      assertEqual(fake.sockets.length, 2, "a second socket is created");
-      assertEqual(fake.sockets[0].sent.length, 2, "the first socket carries both searches");
-      assertEqual(fake.sockets[1].sent.length, 0, "the second socket carries nothing");
+      assertEqual(fake.sockets.length, 1, "one socket serves both searches");
+      assertEqual(fake.sockets[0].sent.length, 2, "both searches are sent");
       ssdp.close();
-      assertEqual(fake.sockets[1].closed, true, "close releases the stored socket");
-      assertEqual(fake.sockets[0].closed, false, "but the working socket is left open");
+      assertEqual(fake.sockets[0].closed, true, "close releases the working socket");
     } finally {
       fake.restore();
     }

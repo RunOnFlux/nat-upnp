@@ -1,0 +1,14 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "packageManager": "npm",
+  "reporters": ["html", "clear-text", "progress"],
+  "testRunner": "command",
+  "commandRunner": {
+    "command": "npm run test"
+  },
+  "mutate": ["src/**/*.ts"],
+  "coverageAnalysis": "off",
+  "disableTypeChecks": true,
+  "concurrency": 8,
+  "timeoutMS": 120000
+}

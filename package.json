@@ -18,7 +18,8 @@
     "watch": "tsc --watch",
     "test": "npm run build && node ./build/test/unit.test.js",
     "flux-test": "npm run build && node ./build/test/index.flux-test.js",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "test:mutation": "stryker run"
   },
   "keywords": [
     "nat",
@@ -29,6 +30,7 @@
     "port-mapping"
   ],
   "devDependencies": {
+    "@stryker-mutator/core": "^9.6.1",
     "@types/node": "^25.5.0",
     "typescript": "^6.0.2"
   },

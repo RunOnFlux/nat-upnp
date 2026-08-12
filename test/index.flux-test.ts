@@ -1,5 +1,6 @@
 const queue: [string, TestOptions][] = [];
 let running = false;
+let failedTestcases = 0;
 
 function header(s: string) {
   console.log("\n==========", s, "==========");
@@ -15,7 +16,10 @@ async function runNextInQueue(prev: string) {
   footer(prev.length);
 
   const [name, opts] = queue.shift() ?? [];
-  if (!name || !opts) process.exit();
+  if (!name || !opts) {
+    console.log(`\nTestcases failed: ${failedTestcases}`);
+    process.exit(failedTestcases > 0 ? 1 : 0);
+  }
   header(name);
   opts.startTests().then(() => runNextInQueue(name));
 }
@@ -95,6 +99,7 @@ export class TestOptions {
         console.log("Testcase: \x1b[32msuccess\x1b[0m");
       } else {
         // failed
+        failedTestcases++;
         errors.forEach((err) => console.error(err));
         console.log(
           "Testcase: \x1b[31mfailed with",

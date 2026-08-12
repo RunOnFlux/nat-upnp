@@ -1517,6 +1517,316 @@ function getSoapFaultCode(xml: string): number | null {
   });
 
   // ========================================
+  // Fault shapes routers actually send
+  // ========================================
+  console.log("\n=== Fault shapes ===\n");
+
+  function faultBody(inner: string, tags: "lower" | "camel" = "lower"): string {
+    const code = tags === "lower" ? "faultcode" : "faultCode";
+    const str = tags === "lower" ? "faultstring" : "faultString";
+    return (
+      '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><s:Fault>' +
+      `<${code}>s:Client</${code}><${str}>UPnPError</${str}>${inner}` +
+      "</s:Fault></s:Body></s:Envelope>"
+    );
+  }
+
+  function upnpError(code: string, description: string): string {
+    return (
+      '<detail><UPnPError xmlns="urn:schemas-upnp-org:control-1-0">' +
+      `<errorCode>${code}</errorCode><errorDescription>${description}</errorDescription>` +
+      "</UPnPError></detail>"
+    );
+  }
+
+  async function faultFrom(body: string): Promise<unknown> {
+    const restore = installFakeRouter("opnsense");
+    const realPost = axiosModule.post;
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+    try {
+      await client.getGateway();
+      (axiosModule as any).post = async () => {
+        throw { response: { data: body, status: 500 } };
+      };
+      return await expectThrow(() => client.getStatusInfo(), "fault");
+    } finally {
+      (axiosModule as any).post = realPost;
+      client.close();
+      restore();
+    }
+  }
+
+  await test("a fault carries its code and description", async () => {
+    const err = await faultFrom(faultBody(upnpError("725", "OnlyPermanentLeasesSupported")));
+    assert(err instanceof UpnpError, "UpnpError");
+    assertEqual((err as UpnpError).code, 725, "code");
+    assertEqual((err as UpnpError).description, "OnlyPermanentLeasesSupported", "description");
+    assertEqual((err as UpnpError).action, "GetStatusInfo", "action");
+  });
+
+  await test("a fault spelled in camelCase is still understood", async () => {
+    // MikroTik spells the SOAP fault tags against the spec.
+    const err = await faultFrom(faultBody(upnpError("402", "Invalid Args"), "camel"));
+    assertEqual((err as UpnpError).code, 402, "code survives the capitalisation");
+    assertEqual((err as UpnpError).description, "Invalid Args", "description");
+  });
+
+  await test("a fault with no UPnPError detail falls back to the fault string", async () => {
+    const err = await faultFrom(faultBody("<detail><other>stuff</other></detail>"));
+    assert(err instanceof UpnpError, "still a UpnpError");
+    assertEqual((err as UpnpError).code, 0, "no code available");
+    assertEqual((err as UpnpError).description, "UPnPError", "falls back to faultstring");
+  });
+
+  await test("a camelCase fault with no detail still finds its description", async () => {
+    const err = await faultFrom(faultBody("<detail><other>stuff</other></detail>", "camel"));
+    assertEqual((err as UpnpError).description, "UPnPError", "faultString is read too");
+  });
+
+  await test("a fault with neither detail nor fault string gets a default description", async () => {
+    const body =
+      '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><s:Fault>' +
+      "<faultcode>s:Client</faultcode></s:Fault></s:Body></s:Envelope>";
+    const err = await faultFrom(body);
+    assert(err instanceof UpnpError, "UpnpError");
+    assertEqual((err as UpnpError).code, 0, "no code available");
+    assertEqual((err as UpnpError).description, "Unknown UPnP error", "a default description");
+  });
+
+  await test("a completely empty Fault element is not recognised as a fault", async () => {
+    // An empty element parses to "", which is falsy, so the fault check skips
+    // it and the transport error propagates instead. No router in the surveyed
+    // corpus sends one, so this pins the behaviour rather than asserting it is
+    // the behaviour we want.
+    const body =
+      '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">' +
+      "<s:Body><s:Fault></s:Fault></s:Body></s:Envelope>";
+    const err = await faultFrom(body);
+    assert(!(err instanceof UpnpError), "an empty Fault falls through to the transport error");
+  });
+
+  await test("a non-numeric error code degrades to zero rather than NaN", async () => {
+    const err = await faultFrom(faultBody(upnpError("not-a-number", "Nonsense")));
+    assertEqual((err as UpnpError).code, 0, "code is zero, never NaN");
+  });
+
+  await test("an HTTP error whose body is not XML is not read as a fault", async () => {
+    const err = await faultFrom("<html><body>Gateway Timeout</body></html>");
+    assert(!(err instanceof UpnpError), "HTML is not a UPnP fault");
+  });
+
+  await test("an error with no response at all propagates untouched", async () => {
+    const restore = installFakeRouter("opnsense");
+    const realPost = axiosModule.post;
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+    try {
+      await client.getGateway();
+      (axiosModule as any).post = async () => {
+        throw new Error("ECONNREFUSED");
+      };
+      const err = await expectThrow(() => client.getStatusInfo(), "no response");
+      assertEqual((err as Error).message, "ECONNREFUSED", "the original error reaches the caller");
+    } finally {
+      (axiosModule as any).post = realPost;
+      client.close();
+      restore();
+    }
+  });
+
+  await test("a response whose data is not a string is not treated as a fault body", async () => {
+    const restore = installFakeRouter("opnsense");
+    const realPost = axiosModule.post;
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+    try {
+      await client.getGateway();
+      // isAxiosErrorWithData only accepts a string body; anything else must
+      // fall through rather than being parsed.
+      (axiosModule as any).post = async () => {
+        throw { response: { data: { not: "a string" }, status: 500 } };
+      };
+      const err = await expectThrow(() => client.getStatusInfo(), "object body");
+      assert(!(err instanceof UpnpError), "an object body is not a fault");
+    } finally {
+      (axiosModule as any).post = realPost;
+      client.close();
+      restore();
+    }
+  });
+
+  await test("the service preference order picks v2 over v1", async () => {
+    // sercomm advertises both; the client must choose WANIPConnection:2.
+    const caps = await withRouter("sercomm-gpon", async (c) => {
+      const info = await c.getGateway();
+      return info.getCapabilities();
+    });
+    assert(caps!.serviceType.endsWith(":2"), `expected a v2 service, got ${caps!.serviceType}`);
+  });
+
+  await test("a description advertising no usable service is refused", async () => {
+    const restore = installFakeRouter("opnsense");
+    const realGet = axiosModule.get;
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+    try {
+      (axiosModule as any).get = async () =>
+        ({
+          data:
+            '<?xml version="1.0"?><root xmlns="urn:schemas-upnp-org:device-1-0"><device>' +
+            "<deviceType>urn:schemas-upnp-org:device:InternetGatewayDevice:1</deviceType>" +
+            "<serviceList><service>" +
+            "<serviceType>urn:schemas-upnp-org:service:Layer3Forwarding:1</serviceType>" +
+            "<controlURL>/ctl</controlURL><SCPDURL>/scpd.xml</SCPDURL>" +
+            "</service></serviceList></device></root>",
+        }) as any;
+      const err = await expectThrow(() => client.getStatusInfo(), "no WAN service");
+      assert(
+        /service not found/i.test((err as Error).message),
+        `expected a service-not-found error, got ${(err as Error).message}`
+      );
+    } finally {
+      (axiosModule as any).get = realGet;
+      client.close();
+      restore();
+    }
+  });
+
+  await test("a description with no root element is refused", async () => {
+    const restore = installFakeRouter("opnsense");
+    const realGet = axiosModule.get;
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+    try {
+      (axiosModule as any).get = async () => ({ data: "<notroot></notroot>" }) as any;
+      const err = await expectThrow(() => client.getStatusInfo(), "no root");
+      assert(
+        /no root element/i.test((err as Error).message),
+        `expected a root-element error, got ${(err as Error).message}`
+      );
+    } finally {
+      (axiosModule as any).get = realGet;
+      client.close();
+      restore();
+    }
+  });
+
+  // ========================================
+  // Finding the gateway by discovery
+  // ========================================
+  console.log("\n=== Gateway discovery ===\n");
+
+  // Everything above hands the client a URL, which skips discovery altogether.
+  // This drives the path a client takes when it has to find the router itself.
+
+  async function withDiscovery<T>(
+    options: { cacheGateway?: boolean; timeout?: number },
+    fn: (client: Client, sockets: FakeSocket[], respond: () => void) => Promise<T>
+  ): Promise<T> {
+    const fake = installFakeDgram();
+    const restore = installFakeRouter("opnsense");
+    const client = new Client({ timeout: options.timeout ?? 300, ...options });
+    const respond = () => {
+      for (const socket of fake.sockets) {
+        socket.deliver(
+          ssdpResponse("urn:schemas-upnp-org:device:InternetGatewayDevice:1", DESCRIPTION_URL)
+        );
+      }
+    };
+    try {
+      return await fn(client, fake.sockets, respond);
+    } finally {
+      client.close();
+      restore();
+      fake.restore();
+    }
+  }
+
+  await test("a client with no URL finds the gateway over SSDP", async () => {
+    await withDiscovery({}, async (client, _sockets, respond) => {
+      const pending = client.getGateway();
+      await settle();
+      respond();
+      const info = await pending;
+      assertEqual(info.gateway.description, DESCRIPTION_URL, "the announced location is used");
+      const device = await info.getDevice();
+      assertEqual(device!.manufacturer, "FreeBSD", "the discovered device is readable");
+    });
+  });
+
+  await test("discovery that nothing answers times out", async () => {
+    await withDiscovery({ timeout: 200 }, async (client) => {
+      const err = await expectThrow(() => client.getGateway(), "unanswered discovery");
+      assert(/timed out/i.test((err as Error).message), `got: ${(err as Error).message}`);
+    });
+  });
+
+  await test("a cached gateway is not rediscovered", async () => {
+    await withDiscovery({ cacheGateway: true }, async (client, sockets, respond) => {
+      const pending = client.getGateway();
+      await settle();
+      respond();
+      await pending;
+      const before = sockets.length;
+      await client.getGateway();
+      assertEqual(sockets.length, before, "no second search is made");
+    });
+  });
+
+  await test("without caching the next call searches again", async () => {
+    await withDiscovery({}, async (client, sockets, respond) => {
+      const first = client.getGateway();
+      await settle();
+      respond();
+      await first;
+      const before = sockets.length;
+      const second = client.getGateway();
+      await settle();
+      respond();
+      await second;
+      assert(sockets.length > before, "a fresh search is made");
+    });
+  });
+
+  await test("concurrent callers share one discovery", async () => {
+    await withDiscovery({}, async (client, sockets, respond) => {
+      // The pending promise is handed to later callers so a burst of calls does
+      // not produce a burst of SSDP searches.
+      const a = client.getGateway();
+      const b = client.getGateway();
+      await settle();
+      respond();
+      const [one, two] = await Promise.all([a, b]);
+      assertEqual(one, two, "both callers get the same gateway");
+      assertEqual(sockets.length, 1, "one search served both");
+    });
+  });
+
+  await test("a response advertising an unusable location is ignored", async () => {
+    await withDiscovery({ timeout: 200 }, async (client, sockets) => {
+      const pending = expectThrow(() => client.getGateway(), "unusable location");
+      await settle();
+      for (const socket of sockets) {
+        socket.deliver(
+          ssdpResponse("urn:schemas-upnp-org:device:InternetGatewayDevice:1", "ftp://192.0.2.1/x")
+        );
+      }
+      const err = await pending;
+      assert(/timed out/i.test((err as Error).message), "a bad location does not resolve discovery");
+    });
+  });
+
+  await test("discovery releases its SSDP socket once finished", async () => {
+    await withDiscovery({}, async (client, sockets, respond) => {
+      const pending = client.getGateway();
+      await settle();
+      respond();
+      await pending;
+      await settle();
+      assert(
+        sockets.every((s) => s.closed),
+        "every socket opened for discovery is closed"
+      );
+    });
+  });
+
+  // ========================================
   // Option handling on the client methods
   // ========================================
   console.log("\n=== Option handling ===\n");

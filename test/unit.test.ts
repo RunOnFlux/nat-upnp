@@ -10,6 +10,8 @@ import { installFakeDgram, FakeSocket, ssdpResponse, settle } from "./fake-dgram
 import {
   installFakeRouter,
   requests,
+  setV2Overrides,
+  portListing,
   DESCRIPTION_URL,
   UNMAPPED_PORT,
   type Breakage,
@@ -1319,6 +1321,173 @@ function getSoapFaultCode(xml: string): number | null {
   await test("decoding does not re-expand what it just produced", () => {
     // "&amp;lt;" means the literal text "&lt;", not a less-than sign.
     assertEqual(decodeXmlEntities("&amp;lt;"), "&lt;", "single pass only");
+  });
+
+  // ========================================
+  // IGD v2 actions
+  // ========================================
+  console.log("\n=== IGD v2 actions ===\n");
+
+  // Gating and request construction need no captured response at all — the
+  // SCPDs in the fixture set already say which routers advertise these.
+  for (const router of routers) {
+    if (v2Routers.has(router)) continue;
+    await test(`${router}: v2 actions are refused on a router that does not advertise them`, async () => {
+      const calls: ((c: Client) => Promise<unknown>)[] = [
+        (c) => c.createAnyMapping({ public: 16137, private: 16137 }),
+        (c) => c.getMappingRange({ startPort: 1, endPort: 65535 }),
+        (c) => c.removeMappingRange({ startPort: 1, endPort: 65535 }),
+      ];
+      for (const call of calls) {
+        const err = await expectThrow(
+          () => withRouter(router, call),
+          `${router}: unsupported v2 action`
+        );
+        assert(
+          /not supported/i.test((err as Error).message),
+          `expected a not-supported error, got: ${(err as Error).message}`
+        );
+      }
+    });
+  }
+
+  await test("createAnyMapping sends the documented arguments", async () => {
+    await withRouter("nokia-igd-v2", (c) =>
+      c.createAnyMapping({ public: 8080, private: 9090, protocol: "udp", ttl: 0 })
+    );
+    const req = requests.find((r) => r.action === "AddAnyPortMapping");
+    assert(!!req, "expected an AddAnyPortMapping request");
+    for (const [tag, value] of [
+      ["NewExternalPort", "8080"],
+      ["NewInternalPort", "9090"],
+      ["NewProtocol", "UDP"],
+      ["NewEnabled", "1"],
+      ["NewLeaseDuration", "0"],
+    ] as const) {
+      assert(req!.body.includes(`<${tag}>${value}</${tag}>`), `${tag} should be ${value}`);
+    }
+  });
+
+  await test("createAnyMapping applies the same defaults as createMapping", async () => {
+    await withRouter("nokia-igd-v2", (c) => c.createAnyMapping({ public: 8080, private: 9090 }));
+    const req = requests.find((r) => r.action === "AddAnyPortMapping");
+    assert(!!req, "expected a request");
+    assert(req!.body.includes("<NewProtocol>TCP</NewProtocol>"), "protocol default");
+    assert(
+      req!.body.includes("<NewPortMappingDescription>node:nat:upnp</NewPortMappingDescription>"),
+      "description default"
+    );
+    assert(req!.body.includes("<NewLeaseDuration>1800</NewLeaseDuration>"), "lease default");
+  });
+
+  await test("createAnyMapping returns the port the router reserved", async () => {
+    setV2Overrides({ reservedPort: 54321 });
+    try {
+      const result = await withRouter("nokia-igd-v2", (c) =>
+        c.createAnyMapping({ public: 8080, private: 9090 })
+      );
+      assertEqual(result.reservedPort, 54321, "reserved port is read from the response");
+    } finally {
+      setV2Overrides({});
+    }
+  });
+
+  await test("removeMappingRange sends the range and the manage flag", async () => {
+    await withRouter("technicolor", (c) =>
+      c.removeMappingRange({ startPort: 100, endPort: 200, protocol: "udp", manage: true })
+    );
+    const req = requests.find((r) => r.action === "DeletePortMappingRange");
+    assert(!!req, "expected a DeletePortMappingRange request");
+    assert(req!.body.includes("<NewStartPort>100</NewStartPort>"), "start port");
+    assert(req!.body.includes("<NewEndPort>200</NewEndPort>"), "end port");
+    assert(req!.body.includes("<NewProtocol>UDP</NewProtocol>"), "protocol");
+    assert(req!.body.includes("<NewManage>1</NewManage>"), "manage true is sent as 1");
+  });
+
+  await test("removeMappingRange defaults manage to 0 and the protocol to TCP", async () => {
+    await withRouter("technicolor", (c) =>
+      c.removeMappingRange({ startPort: 100, endPort: 200 })
+    );
+    const req = requests.find((r) => r.action === "DeletePortMappingRange");
+    assert(!!req, "expected a request");
+    assert(req!.body.includes("<NewManage>0</NewManage>"), "manage defaults to 0");
+    assert(req!.body.includes("<NewProtocol>TCP</NewProtocol>"), "protocol defaults to TCP");
+  });
+
+  await test("getMappingRange sends the range, manage flag and port count", async () => {
+    await withRouter("sercomm-gpon", (c) =>
+      c.getMappingRange({ startPort: 1, endPort: 65535, manage: true, numberOfPorts: 50 })
+    );
+    const req = requests.find((r) => r.action === "GetListOfPortMappings");
+    assert(!!req, "expected a GetListOfPortMappings request");
+    assert(req!.body.includes("<NewStartPort>1</NewStartPort>"), "start port");
+    assert(req!.body.includes("<NewEndPort>65535</NewEndPort>"), "end port");
+    assert(req!.body.includes("<NewManage>1</NewManage>"), "manage");
+    assert(req!.body.includes("<NewNumberOfPorts>50</NewNumberOfPorts>"), "port count");
+  });
+
+  await test("getMappingRange defaults the port count to 1000", async () => {
+    await withRouter("sercomm-gpon", (c) => c.getMappingRange({ startPort: 1, endPort: 100 }));
+    const req = requests.find((r) => r.action === "GetListOfPortMappings");
+    assert(!!req, "expected a request");
+    assert(req!.body.includes("<NewNumberOfPorts>1000</NewNumberOfPorts>"), "default count");
+  });
+
+  await test("getMappingRange parses the port listing", async () => {
+    const mappings = await withRouter("sercomm-gpon", (c) =>
+      c.getMappingRange({ startPort: 1, endPort: 65535 })
+    );
+    assertEqual(mappings.length, 2, "both entries are returned");
+    assertEqual(mappings[0].public.port, 16137, "first external port");
+    assertEqual(mappings[0].private.host, "192.168.1.50", "first internal host");
+    assertEqual(mappings[0].description, "Flux_A", "first description");
+    assertEqual(mappings[0].ttl, 3600, "lease time is read from NewLeaseTime");
+    assertEqual(mappings[1].private.port, 9090, "second internal port");
+    assertEqual(mappings[1].ttl, 0, "a permanent lease reads as 0");
+    assertEqual(mappings[0].protocol, "tcp", "protocol echoes the request, lower-cased");
+  });
+
+  await test("getMappingRange returns nothing when the listing is absent", async () => {
+    setV2Overrides({ listing: null });
+    try {
+      const mappings = await withRouter("sercomm-gpon", (c) =>
+        c.getMappingRange({ startPort: 1, endPort: 65535 })
+      );
+      assertEqual(mappings.length, 0, "a missing NewPortListing yields an empty list");
+    } finally {
+      setV2Overrides({});
+    }
+  });
+
+  await test("getMappingRange returns nothing when the listing is empty", async () => {
+    setV2Overrides({ listing: portListing([]) });
+    try {
+      const mappings = await withRouter("sercomm-gpon", (c) =>
+        c.getMappingRange({ startPort: 1, endPort: 65535 })
+      );
+      assertEqual(mappings.length, 0, "an empty PortMappingList yields an empty list");
+    } finally {
+      setV2Overrides({});
+    }
+  });
+
+  await test("getMappingRange handles a listing with one entry", async () => {
+    // A single entry arrives as an object rather than an array, which is the
+    // shape that most often gets mishandled.
+    setV2Overrides({
+      listing: portListing([
+        { external: 5000, internal: 5000, host: "192.168.1.9", description: "Solo", ttl: 120 },
+      ]),
+    });
+    try {
+      const mappings = await withRouter("sercomm-gpon", (c) =>
+        c.getMappingRange({ startPort: 1, endPort: 65535 })
+      );
+      assertEqual(mappings.length, 1, "a lone entry is still a list");
+      assertEqual(mappings[0].description, "Solo", "description");
+    } finally {
+      setV2Overrides({});
+    }
   });
 
   // ========================================

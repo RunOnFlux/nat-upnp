@@ -83,12 +83,19 @@ setupTest("NAT-UPNP/Client", (opts) => {
   });
 
   opts.run("Gateway caching — second call is instant", async () => {
-    await client.getGateway();
-    const start = Date.now();
-    await client.getGateway();
-    const elapsed = Date.now() - start;
-    console.log("  Second call took:", elapsed, "ms");
-    return elapsed < 50;
+    // cacheGateway defaults to false, so the shared client would rediscover
+    // over SSDP on every call and time the network rather than the cache.
+    const cachingClient = new Client({ cacheGateway: true });
+    try {
+      await cachingClient.getGateway();
+      const start = Date.now();
+      await cachingClient.getGateway();
+      const elapsed = Date.now() - start;
+      console.log("  Second call took:", elapsed, "ms");
+      return elapsed < 50;
+    } finally {
+      cachingClient.close();
+    }
   });
 
   opts.run("Device info caching — second call is instant", async () => {

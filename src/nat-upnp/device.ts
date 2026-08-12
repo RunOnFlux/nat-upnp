@@ -428,9 +428,14 @@ function extractFaultInfo(fault: Record<string, unknown>): { code: number; descr
   const rawDesc = upnpError?.errorDescription;
   return {
     code: rawCode ? Number(rawCode) || 0 : 0,
+    // MikroTik spells the SOAP fault tags faultCode/faultString rather than the
+    // spec's lowercase, so a fault of theirs without a UPnPError detail would
+    // otherwise lose its description entirely.
     description: rawDesc
       ? String(rawDesc)
-      : String((fault as any)?.faultstring || "Unknown UPnP error"),
+      : String(
+          (fault as any)?.faultstring || (fault as any)?.faultString || "Unknown UPnP error"
+        ),
   };
 }
 

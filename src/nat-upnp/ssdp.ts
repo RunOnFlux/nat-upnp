@@ -26,14 +26,19 @@ export class Ssdp implements ISsdp {
 
     const socket = dgram.createSocket({ type: "udp4", reuseAddr: true });
 
+    // Store the socket now, before the bind resolves. Waiting for "listening"
+    // meant a search arriving during the bind saw no socket and created a
+    // second one; the later bind then overwrote this reference, so close()
+    // released the idle socket and left the one carrying traffic open.
+    // `bound` still gates sending, so callers never get an unbound socket.
+    this.socket = socket;
+
     socket.on("message", (message) => {
       if (this.closed) return;
       this.parseResponse(message.toString("utf-8"));
     });
 
     socket.on("listening", () => {
-      // Only store after bind succeeds — prevents concurrent callers getting an unbound socket
-      this.socket = socket;
       this.bound = true;
 
       while (this.pendingSearches.length > 0) {

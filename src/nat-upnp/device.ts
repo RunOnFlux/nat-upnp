@@ -242,7 +242,10 @@ export class Device implements IDevice {
       );
     }
 
-    const baseUrl = new URL(root.baseURL ?? "", this.description);
+    // The element is <URLBase>; anything else resolves relative URLs against
+    // the description URL instead, which is wrong whenever a router serves its
+    // control endpoint from a different host or port.
+    const baseUrl = new URL(root.URLBase ?? "", this.description);
     const prefix = (url: string) =>
       new URL(url, baseUrl.toString()).toString();
 

@@ -1,0 +1,73 @@
+<?xml version="1.0"?>
+<root xmlns="urn:schemas-upnp-org:device-1-0">
+<specVersion>
+<major>1</major>
+<minor>0</minor>
+</specVersion>
+<URLBase>http://192.168.1.1:56688/</URLBase>
+<device>
+<deviceType>urn:schemas-upnp-org:device:InternetGatewayDevice:1</deviceType>
+<presentationURL>http://www.routerlogin.net/</presentationURL>
+<friendlyName>RAX30 (Gateway)</friendlyName>
+<manufacturer>NETGEAR</manufacturer>
+<manufacturerURL>http://www.NETGEAR.com</manufacturerURL>
+<modelDescription>Netgear RAX30 802.11ax Wireless Router</modelDescription>
+<modelName>Netgear RAX30 802.11ax Wireless Router</modelName>
+<modelNumber>RAX30</modelNumber>
+<modelURL>http://www.netgear.com/home/products/</modelURL>
+<UDN>uuid:0a860228-0000-4000-8000-0a8602000000</UDN>
+<serviceList>
+<service>
+<serviceType>urn:schemas-upnp-org:service:Layer3Forwarding:1</serviceType>
+<serviceId>urn:upnp-org:serviceId:Layer3Forwarding.1</serviceId>
+<controlURL>/uuid:4f92b1c1-7952-4c85-93d0-ddabcc000000/Layer3Forwarding:1</controlURL>
+<eventSubURL>/uuid:4f92b1c1-7952-4c85-93d0-ddabcc000000/Layer3Forwarding:1</eventSubURL>
+<SCPDURL>/dynsvc/Layer3Forwarding:1.xml</SCPDURL>
+</service>
+</serviceList>
+<deviceList>
+<device>
+<deviceType>urn:schemas-upnp-org:device:WANDevice:1</deviceType>
+<friendlyName>WANDevice.2</friendlyName>
+<manufacturer>NETGEAR</manufacturer>
+<manufacturerURL>http://www.NETGEAR.com</manufacturerURL>
+<modelDescription>Netgear RAX30 802.11ax Wireless Router</modelDescription>
+<modelName>Netgear RAX30 802.11ax Wireless Router</modelName>
+<modelNumber>RAX30</modelNumber>
+<modelURL>http://www.netgear.com/home/products/</modelURL>
+<UDN>uuid:a0859db3-0000-4000-8000-a0859d000000</UDN>
+<serviceList>
+<service>
+<serviceType>urn:schemas-upnp-org:service:WANCommonInterfaceConfig:1</serviceType>
+<serviceId>urn:upnp-org:serviceId:WANCommonInterfaceConfig.1</serviceId>
+<controlURL>/uuid:98593dbc-cb7b-44a4-a742-0e0dc8000000/WANCommonInterfaceConfig:1</controlURL>
+<eventSubURL>/uuid:98593dbc-cb7b-44a4-a742-0e0dc8000000/WANCommonInterfaceConfig:1</eventSubURL>
+<SCPDURL>/dynsvc/WANCommonInterfaceConfig:1.xml</SCPDURL>
+</service>
+</serviceList>
+<deviceList>
+<device>
+<deviceType>urn:schemas-upnp-org:device:WANConnectionDevice:1</deviceType>
+<friendlyName>WanConnectionDevice.1</friendlyName>
+<manufacturer>NETGEAR</manufacturer>
+<manufacturerURL>http://www.NETGEAR.com</manufacturerURL>
+<modelDescription>Netgear RAX30 802.11ax Wireless Router</modelDescription>
+<modelName>Netgear RAX30 802.11ax Wireless Router</modelName>
+<modelNumber>RAX30</modelNumber>
+<modelURL>http://www.netgear.com/home/products/</modelURL>
+<UDN>uuid:e4d908b4-0000-4000-8000-e4d908000000</UDN>
+<serviceList>
+<service>
+<serviceType>urn:schemas-upnp-org:service:WANIPConnection:1</serviceType>
+<serviceId>urn:upnp-org:serviceId:WANIPConnection.1</serviceId>
+<controlURL>/uuid:811a9e2f-733c-417a-8c93-e8a455000000/WANIPConnection:1</controlURL>
+<eventSubURL>/uuid:811a9e2f-733c-417a-8c93-e8a455000000/WANIPConnection:1</eventSubURL>
+<SCPDURL>/dynsvc/WANIPConnection:1.xml</SCPDURL>
+</service>
+</serviceList>
+</device>
+</deviceList>
+</device>
+</deviceList>
+</device>
+</root>

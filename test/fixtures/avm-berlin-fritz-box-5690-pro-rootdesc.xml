@@ -1,0 +1,97 @@
+<?xml version="1.0"?>
+<root xmlns="urn:schemas-upnp-org:device-1-0">
+<specVersion>
+<major>1</major>
+<minor>0</minor>
+</specVersion>
+<device>
+<deviceType>urn:schemas-upnp-org:device:InternetGatewayDevice:2</deviceType>
+<friendlyName>InternetGatewayDeviceV2 - FRITZ!Box 5690 Pro</friendlyName>
+<manufacturer>AVM Berlin</manufacturer>
+<manufacturerURL>https://fritz.com</manufacturerURL>
+<modelDescription>FRITZ!Box 5690 Pro</modelDescription>
+<modelName>FRITZ!Box 5690 Pro</modelName>
+<modelNumber>5690avme</modelNumber>
+<modelURL>https://fritz.com</modelURL>
+<UDN>uuid:da4f3381-0000-4000-8000-da4f33000000</UDN>
+<iconList>
+<icon>
+<mimetype>image/gif</mimetype>
+<width>118</width>
+<height>119</height>
+<depth>8</depth>
+<url>/ligd.gif</url>
+</icon>
+</iconList>
+<serviceList>
+<service>
+<serviceType>urn:schemas-any-com:service:Any:1</serviceType>
+<serviceId>urn:any-com:serviceId:any1</serviceId>
+<controlURL>/igd2upnp/control/any</controlURL>
+<eventSubURL>/igd2upnp/control/any</eventSubURL>
+<SCPDURL>/any.xml</SCPDURL>
+</service>
+</serviceList>
+<deviceList>
+<device>
+<deviceType>urn:schemas-upnp-org:device:WANDevice:2</deviceType>
+<friendlyName>WANDevice - FRITZ!Box 5690 Pro</friendlyName>
+<manufacturer>AVM Berlin</manufacturer>
+<manufacturerURL>https://fritz.com</manufacturerURL>
+<modelDescription>WANDevice - FRITZ!Box 5690 Pro</modelDescription>
+<modelName>WANDevice - FRITZ!Box 5690 Pro</modelName>
+<modelNumber>5690avme</modelNumber>
+<modelURL>https://fritz.com</modelURL>
+<UDN>uuid:f0517370-0000-4000-8000-f05173000000</UDN>
+<UPC>AVM IGD2</UPC>
+<serviceList>
+<service>
+<serviceType>urn:schemas-upnp-org:service:WANCommonInterfaceConfig:1</serviceType>
+<serviceId>urn:upnp-org:serviceId:WANCommonIFC1</serviceId>
+<controlURL>/igd2upnp/control/WANCommonIFC1</controlURL>
+<eventSubURL>/igd2upnp/control/WANCommonIFC1</eventSubURL>
+<SCPDURL>/igdicfgSCPD.xml</SCPDURL>
+</service>
+</serviceList>
+<deviceList>
+<device>
+<deviceType>urn:schemas-upnp-org:device:WANConnectionDevice:2</deviceType>
+<friendlyName>WANConnectionDevice - FRITZ!Box 5690 Pro</friendlyName>
+<manufacturer>AVM Berlin</manufacturer>
+<manufacturerURL>https://fritz.com</manufacturerURL>
+<modelDescription>WANConnectionDevice - FRITZ!Box 5690 Pro</modelDescription>
+<modelName>WANConnectionDevice - FRITZ!Box 5690 Pro</modelName>
+<modelNumber>5690avme</modelNumber>
+<modelURL>https://fritz.com</modelURL>
+<UDN>uuid:13ade1b1-0000-4000-8000-13ade1000000</UDN>
+<UPC>AVM IGD2</UPC>
+<serviceList>
+<service>
+<serviceType>urn:schemas-upnp-org:service:WANDSLLinkConfig:1</serviceType>
+<serviceId>urn:upnp-org:serviceId:WANDSLLinkC1</serviceId>
+<controlURL>/igd2upnp/control/WANDSLLinkC1</controlURL>
+<eventSubURL>/igd2upnp/control/WANDSLLinkC1</eventSubURL>
+<SCPDURL>/igddslSCPD.xml</SCPDURL>
+</service>
+<service>
+<serviceType>urn:schemas-upnp-org:service:WANIPConnection:2</serviceType>
+<serviceId>urn:upnp-org:serviceId:WANIPConn2</serviceId>
+<controlURL>/igd2upnp/control/WANIPConn2</controlURL>
+<eventSubURL>/igd2upnp/control/WANIPConn2</eventSubURL>
+<SCPDURL>/igd2connSCPD.xml</SCPDURL>
+</service>
+<service>
+<serviceType>urn:schemas-upnp-org:service:WANIPv6FirewallControl:1</serviceType>
+<serviceId>urn:upnp-org:serviceId:WANIPv6Firewall1</serviceId>
+<controlURL>/igd2upnp/control/WANIPv6Firewall1</controlURL>
+<eventSubURL>/igd2upnp/control/WANIPv6Firewall1</eventSubURL>
+<SCPDURL>/igd2ipv6fwcSCPD.xml</SCPDURL>
+</service>
+</serviceList>
+</device>
+</deviceList>
+</device>
+</deviceList>
+<presentationURL>http://192.168.178.1</presentationURL>
+</device>
+</root>

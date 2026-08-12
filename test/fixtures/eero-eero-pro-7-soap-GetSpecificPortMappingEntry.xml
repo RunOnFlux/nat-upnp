@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+    <s:Body>
+        <u:GetSpecificPortMappingEntryResponse xmlns:u="urn:schemas-upnp-org:service:WANIPConnection:1">
+            <NewRemoteHost></NewRemoteHost>
+            <NewExternalPort>3478</NewExternalPort>
+            <NewProtocol>UDP</NewProtocol>
+            <NewInternalPort>3478</NewInternalPort>
+            <NewInternalClient>192.168.4.33</NewInternalClient>
+            <NewEnabled>1</NewEnabled>
+            <NewPortMappingDescription>[redacted]</NewPortMappingDescription>
+            <NewLeaseDuration>0</NewLeaseDuration>
+        </u:GetSpecificPortMappingEntryResponse>
+    </s:Body>
+</s:Envelope>

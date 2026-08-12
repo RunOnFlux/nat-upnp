@@ -1,0 +1,77 @@
+<?xml version="1.0"?>
+<root xmlns="urn:schemas-upnp-org:device-1-0">
+<specVersion>
+<major>1</major>
+<minor>0</minor>
+</specVersion>
+<device>
+<deviceType>urn:schemas-upnp-org:device:InternetGatewayDevice:1</deviceType>
+<friendlyName>SG000000T</friendlyName>
+<manufacturer>Cisco</manufacturer>
+<manufacturerURL>http://www.cisco.com/</manufacturerURL>
+<modelDescription>SG417DBCT</modelDescription>
+<modelName>SG417DBCT</modelName>
+<modelNumber>SG417DBCT</modelNumber>
+<modelURL>http://www.cisco.com</modelURL>
+<serialNumber></serialNumber>
+<UDN>uuid:ebf52da2cb1-0000-4000-8000-52da2c000000</UDN>
+<UPC>SG417DBCT</UPC>
+<serviceList>
+<service>
+<serviceType>urn:schemas-upnp-org:service:Layer3Forwarding:1</serviceType>
+<serviceId>urn:upnp-org:serviceId:L3Forwarding1</serviceId>
+<SCPDURL>/Layer3ForwardingSCPD.xml</SCPDURL>
+<controlURL>/upnp/control/Layer3Forwarding</controlURL>
+<eventSubURL>/upnp/event/Layer3Forwarding</eventSubURL>
+</service>
+</serviceList>
+<deviceList>
+<device>
+<deviceType>urn:schemas-upnp-org:device:WANDevice:1</deviceType>
+<friendlyName>WANDevice:1</friendlyName>
+<manufacturer>Cisco</manufacturer>
+<manufacturerURL>http://www.cisco.com/</manufacturerURL>
+<modelDescription>SG417DBCT</modelDescription>
+<modelName>SG417DBCT</modelName>
+<modelNumber>SG417DBCT</modelNumber>
+<modelURL>http://www.cisco.com</modelURL>
+<serialNumber></serialNumber>
+<UDN>uuid:ebf8df9df6c-0000-4000-8000-8df9df000000</UDN>
+<UPC>SG417DBCT</UPC>
+<serviceList>
+<service>
+<serviceType>urn:schemas-upnp-org:service:WANCommonInterfaceConfig:1</serviceType>
+<serviceId>urn:upnp-org:serviceId:WANCommonIFC1</serviceId>
+<SCPDURL>/WANCommonInterfaceConfigSCPD.xml</SCPDURL>
+<controlURL>/upnp/control/WANCommonInterfaceConfig0</controlURL>
+<eventSubURL>/upnp/event/WANCommonInterfaceConfig0</eventSubURL>
+</service>
+</serviceList>
+<deviceList>
+    <device>
+        <deviceType>urn:schemas-upnp-org:device:WANConnectionDevice:1</deviceType>
+        <friendlyName>WANConnectionDevice:1</friendlyName>
+        <manufacturer>Cisco</manufacturer>
+        <manufacturerURL>http://www.cisco.com/</manufacturerURL>
+        <modelDescription>SG417DBCT</modelDescription>
+        <modelName>SG417DBCT</modelName>
+        <modelNumber>SG417DBCT</modelNumber>
+        <modelURL>http://www.cisco.com</modelURL>
+        <serialNumber></serialNumber>
+        <UDN>uuid:ebf47563288-0000-4000-8000-475632000000</UDN>
+        <UPC>SG417DBCT</UPC>
+        <serviceList>
+       <service>
+           <serviceType>urn:schemas-upnp-org:service:WANIPConnection:1</serviceType>
+           <serviceId>urn:upnp-org:serviceId:WANIPConn1</serviceId>
+           <SCPDURL>/WANIPConnectionServiceSCPD.xml</SCPDURL>
+           <controlURL>/upnp/control/WANIPConnection0</controlURL>
+           <eventSubURL>/upnp/event/WANIPConnection0</eventSubURL>
+       </service>
+        </serviceList>
+    </device>
+</deviceList>
+</device>
+</deviceList>
+<presentationURL>http://10.0.0.1/</presentationURL></device>
+</root>

@@ -6,6 +6,7 @@ import { UpnpError, decodeXmlEntities } from "../src/nat-upnp/device";
 import { Device } from "../src/nat-upnp/device";
 import { Client } from "../src/nat-upnp/client";
 import { parseMimeHeader, Ssdp, type SsdpEmitter } from "../src/nat-upnp/ssdp";
+import { surveyedRouters } from "./router-data";
 import { installFakeDgram, FakeSocket, ssdpResponse, settle } from "./fake-dgram";
 import {
   installFakeRouter,
@@ -1723,6 +1724,95 @@ function getSoapFaultCode(xml: string): number | null {
       ssdp.close();
       fake.restore();
     }
+  });
+
+  // ========================================
+  // The surveyed corpus
+  // ========================================
+  console.log(`\n=== Surveyed routers (${surveyedRouters.length}) ===\n`);
+
+  // Every router asserts against its own captured documents rather than a
+  // shared assumption, because the survey showed they do not agree: the walk
+  // ends on 402 as well as 713, and timed leases are refused with 725, 501 and
+  // 718. Values come from the capture, never from this library's parser.
+  for (const router of surveyedRouters) {
+    await test(`${router.slug}: client reads its captured responses`, async () => {
+      const restore = installFakeRouter(router.slug);
+      const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+      try {
+        const info = await client.getGateway();
+
+        const device = await info.getDevice();
+        assert(device !== null, "device info");
+        assertEqual(device!.manufacturer, router.manufacturer, "manufacturer");
+        assertEqual(device!.modelName, router.modelName, "modelName");
+        assertEqual(device!.specVersion.major, router.specMajor, "spec major");
+
+        const caps = await info.getCapabilities();
+        assert(caps !== null, "capabilities");
+        assertEqual(caps!.serviceVersion, router.serviceVersion, "service version");
+        assertEqual(
+          caps!.actions.length,
+          router.actions.length,
+          "every advertised action is parsed"
+        );
+        assertEqual(
+          caps!.supportsAddAnyPortMapping,
+          router.actions.includes("AddAnyPortMapping"),
+          "v2 flag tracks the action list"
+        );
+
+        assertEqual(await client.getPublicIp(), router.externalIp, "external address");
+
+        if (router.connectionStatus) {
+          const status = await client.getStatusInfo();
+          assertEqual(status.connectionStatus, router.connectionStatus, "connection status");
+        }
+
+        // The walk must terminate whatever code this router ends it with.
+        const mappings = await client.getMappings();
+        if (router.genericEntry) {
+          assertEqual(mappings.length, 1, "the captured entry is returned");
+          const m = mappings[0];
+          assertEqual(m.public.port, router.genericEntry.external, "external port");
+          assertEqual(m.private.host, router.genericEntry.host, "internal host");
+          assertEqual(m.private.port, router.genericEntry.internal, "internal port");
+          assertEqual(m.protocol, router.genericEntry.protocol, "protocol");
+          assertEqual(m.description, router.genericEntry.description, "description");
+        }
+
+        if (router.specificEntry) {
+          const hit = await client.getMapping({ public: router.genericEntry!.external });
+          assert(hit !== null, "specific entry");
+          assertEqual(hit!.private.host, router.specificEntry.host, "specific internal host");
+          assertEqual(hit!.private.port, router.specificEntry.internal, "specific internal port");
+          assertEqual(hit!.description, router.specificEntry.description, "specific description");
+        }
+
+        // A missing mapping resolves to null on any router answering 713/714.
+        if (router.notFoundCode === 713 || router.notFoundCode === 714) {
+          assertEqual(
+            await client.getMapping({ public: UNMAPPED_PORT }),
+            null,
+            `not-found ${router.notFoundCode} should resolve to null`
+          );
+        }
+      } finally {
+        client.close();
+        restore();
+      }
+    });
+  }
+
+  await test("the corpus covers the disagreements the fleet actually shows", async () => {
+    // A guard on the corpus itself: if a regeneration quietly dropped the
+    // outliers, these tests would still pass while testing nothing unusual.
+    const endCodes = new Set(surveyedRouters.map((r) => r.endOfListCode));
+    const leaseCodes = new Set(surveyedRouters.map((r) => r.ttl60Code).filter((c) => c !== null));
+    const versions = new Set(surveyedRouters.map((r) => r.serviceVersion));
+    assert(endCodes.has(713) && endCodes.has(402), `end-of-list codes: ${[...endCodes]}`);
+    assert(leaseCodes.size >= 2, `expected several lease rejections, got ${[...leaseCodes]}`);
+    assert(versions.has(1) && versions.has(2), `expected both IGD versions, got ${[...versions]}`);
   });
 
   // ========================================

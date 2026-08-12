@@ -1,0 +1,78 @@
+<?xml version="1.0"?>
+<root xmlns="urn:schemas-upnp-org:device-1-0">
+<specVersion>
+<major>1</major>
+<minor>0</minor>
+</specVersion>
+<URLBase></URLBase>
+<device>
+<deviceType>urn:schemas-upnp-org:device:InternetGatewayDevice:1</deviceType>
+<presentationURL>http://192.168.222.1:80     </presentationURL>
+<friendlyName                 >Omada SMB ER605</friendlyName>
+<manufacturer                >Omada by tp-link</manufacturer>
+<manufacturerURL    >http://www.omadanetworks.com</manufacturerURL>
+<modelURL    >http://www.omadanetworks.com</modelURL>
+<modelDescription      >Omada by tp-link ER605 2.0</modelDescription>
+<modelName                           >ER605</modelName>
+<modelNumber                             >2.0</modelNumber>
+<UDN>uuid:upnp31e4ec14-0000-4000-8000-31e4ec000000</UDN>
+<UPC>123456000000</UPC>
+<serviceList>
+<service>
+<serviceType>urn:schemas-upnp-org:service:Layer3Forwarding:1</serviceType>
+<serviceId>urn:upnp-org:serviceId:L3Forwarding1</serviceId>
+<controlURL>/l3f0178580823488888</controlURL>
+<eventSubURL>/l3f0178580823488888</eventSubURL>
+<SCPDURL>/l3f0178580823488888.xml</SCPDURL>
+</service>
+</serviceList>
+<deviceList>
+<device>
+<deviceType>urn:schemas-upnp-org:device:WANDevice:1</deviceType>
+<friendlyName>WAN Device</friendlyName>
+<manufacturer                >Omada by tp-link</manufacturer>
+<manufacturerURL    >http://www.omadanetworks.com</manufacturerURL>
+<modelDescription>WAN Device</modelDescription>
+<modelName>WAN Device</modelName>
+<modelNumber>1</modelNumber>
+<modelURL></modelURL>
+<serialNumber>SERIAL0001</serialNumber>
+<UDN>uuid:upnp0a9ba047-0000-4000-8000-0a9ba0000000</UDN>
+<UPC>123456000000</UPC>
+<serviceList>
+<service>
+<serviceType>urn:schemas-upnp-org:service:WANCommonInterfaceConfig:1</serviceType>
+<serviceId>urn:upnp-org:serviceId:WANCommonInterfaceConfig</serviceId>
+<controlURL>/ifc0178580823488888</controlURL>
+<eventSubURL>/ifc0178580823488888</eventSubURL>
+<SCPDURL>/ifc0178580823488888.xml</SCPDURL>
+</service>
+</serviceList>
+<deviceList>
+<device>
+<deviceType>urn:schemas-upnp-org:device:WANConnectionDevice:1</deviceType>
+<friendlyName>WAN Connection Device</friendlyName>
+<manufacturer                >Omada by tp-link</manufacturer>
+<manufacturerURL    >http://www.omadanetworks.com</manufacturerURL>
+<modelDescription>WAN Connection Device</modelDescription>
+<modelName>WAN Connection Device</modelName>
+<modelNumber>1</modelNumber>
+<modelURL></modelURL>
+<serialNumber>SERIAL0001</serialNumber>
+<UDN>uuid:upnp3446d589-0000-4000-8000-3446d5000000</UDN>
+<UPC>123456000000</UPC>
+<serviceList>
+<service>
+<serviceType>urn:schemas-upnp-org:service:WANIPConnection:1</serviceType>
+<serviceId>urn:upnp-org:serviceId:WANIPConnection</serviceId>
+<controlURL>/ipc0178580823488888</controlURL>
+<eventSubURL>/ipc0178580823488888</eventSubURL>
+<SCPDURL>/ipc0178580823488888.xml</SCPDURL>
+</service>
+</serviceList>
+</device>
+</deviceList>
+</device>
+</deviceList>
+</device>
+</root>

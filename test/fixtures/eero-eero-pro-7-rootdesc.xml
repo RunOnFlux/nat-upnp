@@ -1,0 +1,70 @@
+<?xml version="1.0"?>
+<root xmlns="urn:schemas-upnp-org:device-1-0">
+   <specVersion>
+      <major>1</major>
+      <minor>0</minor>
+   </specVersion>
+   <URLBase>http://192.168.4.1:1900/</URLBase>
+   <device>
+      <deviceType>urn:schemas-upnp-org:device:InternetGatewayDevice:1</deviceType>
+      <friendlyName>eero</friendlyName>
+      <manufacturer>eero inc.</manufacturer>
+      <manufacturerURL>https://eero.com</manufacturerURL>
+      <modelDescription>eero</modelDescription>
+      <modelNumber>0.0.1</modelNumber>
+      <modelName>eero Pro 7</modelName>
+      <UDN>uuid:fcdb23000000-0000-4000-8000-2394db000000</UDN>
+      <serviceList>
+         <service>
+            <serviceType>urn:schemas-upnp-org:service:Layer3Forwarding:1</serviceType>
+            <serviceId>urn:upnp-org:serviceId:L3Forwarding1</serviceId>
+            <controlURL>/l3f</controlURL>
+            <eventSubURL>/l3f/events</eventSubURL>
+            <SCPDURL>/l3f.xml</SCPDURL>
+         </service>
+      </serviceList>
+      <deviceList>
+         <device>
+            <deviceType>urn:schemas-upnp-org:device:WANDevice:1</deviceType>
+            <friendlyName>eero</friendlyName>
+            <manufacturer>eero inc.</manufacturer>
+            <manufacturerURL>https://eero.com</manufacturerURL>
+            <modelDescription>eero</modelDescription>
+            <modelNumber>0.0.1</modelNumber>
+            <modelName>eero Pro 7</modelName>
+            <UDN>uuid:fcdb23000000-0000-4000-8000-2394db000000</UDN>
+            <serviceList>
+               <service>
+                  <serviceType>urn:schemas-upnp-org:service:WANCommonInterfaceConfig:1</serviceType>
+                  <serviceId>urn:upnp-org:serviceId:WANCommonInterfaceConfig</serviceId>
+                  <controlURL>/ifc</controlURL>
+                  <eventSubURL>/ifc/events</eventSubURL>
+                  <SCPDURL>/ifc.xml</SCPDURL>
+               </service>
+            </serviceList>
+            <deviceList>
+               <device>
+                  <deviceType>urn:schemas-upnp-org:device:WANConnectionDevice:1</deviceType>
+                  <friendlyName>eero</friendlyName>
+                  <manufacturer>eero inc.</manufacturer>
+                  <manufacturerURL>https://eero.com</manufacturerURL>
+                  <modelDescription>eero</modelDescription>
+                  <modelNumber>0.0.1</modelNumber>
+                  <modelName>eero Pro 7</modelName>
+                  <UDN>uuid:fcdb23000000-0000-4000-8000-2394db000000</UDN>
+                  <serviceList>
+                     <service>
+                        <serviceType>urn:schemas-upnp-org:service:WANIPConnection:1</serviceType>
+                        <serviceId>urn:upnp-org:serviceId:WANIPConnection</serviceId>
+                        <controlURL>/ipc</controlURL>
+                        <eventSubURL>/ipc/events</eventSubURL>
+                        <SCPDURL>/ipc.xml</SCPDURL>
+                     </service>
+                  </serviceList>
+               </device>
+            </deviceList>
+         </device>
+      </deviceList>
+      <presentationURL>https://eero.com</presentationURL>
+   </device>
+</root>

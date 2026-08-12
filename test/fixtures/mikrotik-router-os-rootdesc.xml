@@ -1,0 +1,87 @@
+<?xml version="1.0"?>
+<root xmlns="urn:schemas-upnp-org:device-1-0">
+  <specVersion>
+    <major>1</major>
+    <minor>0</minor>
+  </specVersion>
+  <device>
+    <deviceType>urn:schemas-upnp-org:device:InternetGatewayDevice:1</deviceType>
+    <friendlyName>MikroTik Router</friendlyName>
+    <manufacturer>MikroTik</manufacturer>
+    <manufacturerURL>https://www.mikrotik.com/</manufacturerURL>
+    <modelName>Router OS</modelName>
+    <UDN>uuid:UUID98b9404f-0000-4000-8000-98b940000000</UDN>
+    <iconList>
+      <icon>
+        <mimetype>image/gif</mimetype>
+        <width>16</width>
+        <height>16</height>
+        <depth>8</depth>
+        <url>/logo16.gif</url>
+      </icon>
+      <icon>
+        <mimetype>image/gif</mimetype>
+        <width>32</width>
+        <height>32</height>
+        <depth>8</depth>
+        <url>/logo32.gif</url>
+      </icon>
+      <icon>
+        <mimetype>image/gif</mimetype>
+        <width>48</width>
+        <height>48</height>
+        <depth>8</depth>
+        <url>/logo48.gif</url>
+      </icon>
+    </iconList>
+    <serviceList>
+      <service>
+        <serviceType>urn:schemas-microsoft-com:service:OSInfo:1</serviceType>
+        <serviceId>urn:microsoft-com:serviceId:OSInfo1</serviceId>
+        <SCPDURL>/osinfo.xml</SCPDURL>
+        <controlURL>/upnp/control/dhunebxqjl/osinfo</controlURL>
+        <eventSubURL>/upnp/event/jostsxpjvq/osinfo</eventSubURL>
+      </service>
+    </serviceList>
+    <deviceList>
+      <device>
+        <deviceType>urn:schemas-upnp-org:device:WANDevice:1</deviceType>
+        <friendlyName>WAN Device</friendlyName>
+        <manufacturer>MikroTik</manufacturer>
+        <manufacturerURL>https://www.mikrotik.com/</manufacturerURL>
+        <modelName>Router OS</modelName>
+        <UDN>uuid:UUIDa71eb39b-0000-4000-8000-a71eb3000000</UDN>
+        <serviceList>
+          <service>
+            <serviceType>urn:schemas-upnp-org:service:WANCommonInterfaceConfig:1</serviceType>
+            <serviceId>urn:upnp-org:serviceId:WANCommonIFC1</serviceId>
+            <SCPDURL>/wancommonifc-2.xml</SCPDURL>
+            <controlURL>/upnp/control/awxfapavwu/wancommonifc-2</controlURL>
+            <eventSubURL>/upnp/event/sweghdnyaz/wancommonifc-2</eventSubURL>
+          </service>
+        </serviceList>
+        <deviceList>
+          <device>
+            <deviceType>urn:schemas-upnp-org:device:WANConnectionDevice:1</deviceType>
+            <friendlyName>WAN Connection Device</friendlyName>
+            <manufacturer>MikroTik</manufacturer>
+            <manufacturerURL>https://www.mikrotik.com/</manufacturerURL>
+            <modelName>Router OS</modelName>
+            <UDN>uuid:UUIDf3df32c4-0000-4000-8000-f3df32000000</UDN>
+            <serviceList>
+              <service>
+                <serviceType>urn:schemas-upnp-org:service:WANIPConnection:1</serviceType>
+                <serviceId>urn:upnp-org:serviceId:WANIPConn1</serviceId>
+                <SCPDURL>/wanipconn-2.xml</SCPDURL>
+                <controlURL>/upnp/control/yzsmazbtvg/wanipconn-2</controlURL>
+                <eventSubURL>/upnp/event/kowjpllyat/wanipconn-2</eventSubURL>
+              </service>
+            </serviceList>
+          </device>
+        </deviceList>
+      </device>
+    </deviceList>
+    <presentationURL>http://192.168.10.1/</presentationURL>
+  </device>
+  <URLBase>http://192.168.10.1:2828</URLBase>
+</root>

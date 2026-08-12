@@ -1,0 +1,9 @@
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body>
+<u:GetSpecificPortMappingEntryResponse xmlns:u="urn:schemas-upnp-org:service:WANIPConnection:2">
+<NewInternalPort>16122</NewInternalPort>
+<NewInternalClient>192.168.1.15</NewInternalClient>
+<NewEnabled>1</NewEnabled>
+<NewPortMappingDescription>FluxOS Reserved</NewPortMappingDescription>
+<NewLeaseDuration>3097</NewLeaseDuration>
+</u:GetSpecificPortMappingEntryResponse>
+</s:Body> </s:Envelope>

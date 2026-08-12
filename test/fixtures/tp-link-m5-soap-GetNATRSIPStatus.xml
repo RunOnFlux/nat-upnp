@@ -1,0 +1,2 @@
+<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body><u:GetNATRSIPStatusResponse xmlns:u="urn:schemas-upnp-org:service:WANIPConnection:1"><NewRSIPAvailable>0</NewRSIPAvailable><NewNATEnabled>1</NewNATEnabled></u:GetNATRSIPStatusResponse></s:Body></s:Envelope>

@@ -16,6 +16,6 @@
   ],
   "coverageAnalysis": "off",
   "disableTypeChecks": true,
-  "concurrency": 4,
+  "concurrency": 14,
   "timeoutMS": 120000
 }

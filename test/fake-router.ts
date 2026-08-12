@@ -103,6 +103,12 @@ export function portListing(
   return `<p:PortMappingList xmlns:p="urn:schemas-upnp-org:gw:WANIPConnection">${body}</p:PortMappingList>`;
 }
 
+/** Send the listing entity-escaped instead of in CDATA. */
+export let v2Escaped = false;
+export function setV2Escaped(on: boolean): void {
+  v2Escaped = on;
+}
+
 /** Overrides the synthetic v2 answers for a single install. */
 export let v2Overrides: { reservedPort?: number; listing?: string | null } = {};
 export function setV2Overrides(next: typeof v2Overrides): void {
@@ -125,10 +131,13 @@ function v2Response(action: string): string | null {
           { external: 16137, internal: 16137, host: "192.168.1.50", description: "Flux_A", ttl: 3600 },
           { external: 16147, internal: 9090, host: "192.168.1.51", description: "Flux_B", ttl: 0 },
         ]);
-      return envelope(
-        "GetListOfPortMappings",
-        `<NewPortListing>${listing.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</NewPortListing>`
-      );
+      // Real routers wrap the listing in CDATA -- confirmed against three
+      // Ubiquiti gateways. The spec permits entity escaping too, so
+      // `escapeListing` covers that variant separately.
+      const wrapped = v2Escaped
+        ? listing.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        : `<![CDATA[${listing}]]>`;
+      return envelope("GetListOfPortMappings", `<NewPortListing>${wrapped}</NewPortListing>`);
     }
     case "DeletePortMappingRange":
       return envelope("DeletePortMappingRange", "");

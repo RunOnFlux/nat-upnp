@@ -11,6 +11,7 @@ import {
   installFakeRouter,
   requests,
   setV2Overrides,
+  setV2Escaped,
   portListing,
   DESCRIPTION_URL,
   UNMAPPED_PORT,
@@ -1445,6 +1446,30 @@ function getSoapFaultCode(xml: string): number | null {
     assertEqual(mappings[1].private.port, 9090, "second internal port");
     assertEqual(mappings[1].ttl, 0, "a permanent lease reads as 0");
     assertEqual(mappings[0].protocol, "tcp", "protocol echoes the request, lower-cased");
+  });
+
+  await test("getMappingRange reads a listing sent as CDATA", async () => {
+    // What real routers send: three Ubiquiti gateways surveyed all wrap the
+    // PortMappingList in CDATA rather than escaping it.
+    const mappings = await withRouter("sercomm-gpon", (c) =>
+      c.getMappingRange({ startPort: 1, endPort: 65535 })
+    );
+    assertEqual(mappings.length, 2, "CDATA listing parses");
+  });
+
+  await test("getMappingRange reads a listing sent entity-escaped", async () => {
+    // The spec allows the listing to be escaped instead, and nothing in the
+    // wild has been seen doing it -- this is why the parser decodes the
+    // predefined entities before the inner parse.
+    setV2Escaped(true);
+    try {
+      const mappings = await withRouter("sercomm-gpon", (c) =>
+        c.getMappingRange({ startPort: 1, endPort: 65535 })
+      );
+      assertEqual(mappings.length, 2, "escaped listing parses too");
+    } finally {
+      setV2Escaped(false);
+    }
   });
 
   await test("getMappingRange returns nothing when the listing is absent", async () => {

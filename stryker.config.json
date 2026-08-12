@@ -1,12 +1,19 @@
 {
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
   "packageManager": "npm",
-  "reporters": ["html", "clear-text", "progress"],
+  "reporters": [
+    "html",
+    "json",
+    "clear-text",
+    "progress"
+  ],
   "testRunner": "command",
   "commandRunner": {
     "command": "npm run test"
   },
-  "mutate": ["src/**/*.ts"],
+  "mutate": [
+    "src/**/*.ts"
+  ],
   "coverageAnalysis": "off",
   "disableTypeChecks": true,
   "concurrency": 8,

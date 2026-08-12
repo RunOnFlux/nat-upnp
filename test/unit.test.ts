@@ -1517,6 +1517,164 @@ function getSoapFaultCode(xml: string): number | null {
   });
 
   // ========================================
+  // Option handling on the client methods
+  // ========================================
+  console.log("\n=== Option handling ===\n");
+
+  await test("createMapping accepts a combined public/private port shape", async () => {
+    // The options normalise several shapes; a caller may give one port meaning
+    // both sides, or an object carrying a host.
+    await withRouter("opnsense", (c) => c.createMapping({ public: 7000, private: 7000, ttl: 0 }));
+    const one = requests.find((r) => r.action === "AddPortMapping");
+    assert(one!.body.includes("<NewExternalPort>7000</NewExternalPort>"), "external");
+    assert(one!.body.includes("<NewInternalPort>7000</NewInternalPort>"), "internal");
+  });
+
+  await test("createMapping honours an explicit internal host", async () => {
+    await withRouter("opnsense", (c) =>
+      c.createMapping({
+        public: 7001,
+        private: { host: "192.168.5.5", port: 7002 },
+        ttl: 0,
+      })
+    );
+    const req = requests.find((r) => r.action === "AddPortMapping");
+    assert(
+      req!.body.includes("<NewInternalClient>192.168.5.5</NewInternalClient>"),
+      `explicit host should override the resolved one — got ${req!.body}`
+    );
+    assert(req!.body.includes("<NewInternalPort>7002</NewInternalPort>"), "internal port");
+  });
+
+  await test("createMapping sends a remote host when one is given", async () => {
+    await withRouter("opnsense", (c) =>
+      c.createMapping({
+        public: { host: "198.51.100.7", port: 7003 },
+        private: 7003,
+        ttl: 0,
+      })
+    );
+    const req = requests.find((r) => r.action === "AddPortMapping");
+    assert(
+      req!.body.includes("<NewRemoteHost>198.51.100.7</NewRemoteHost>"),
+      `remote host should be sent — got ${req!.body}`
+    );
+  });
+
+  await test("removeMapping carries the remote host through", async () => {
+    await withRouter("opnsense", (c) =>
+      c.removeMapping({ public: { host: "198.51.100.8", port: 7004 } })
+    );
+    const req = requests.find((r) => r.action === "DeletePortMapping");
+    assert(req!.body.includes("<NewRemoteHost>198.51.100.8</NewRemoteHost>"), "remote host");
+    assert(req!.body.includes("<NewExternalPort>7004</NewExternalPort>"), "external port");
+  });
+
+  await test("getMapping asks about the remote host it was given", async () => {
+    await withRouter("opnsense", (c) =>
+      c.getMapping({ public: 16132, remoteHost: "198.51.100.9" })
+    );
+    const req = requests.find((r) => r.action === "GetSpecificPortMappingEntry");
+    assert(req!.body.includes("<NewRemoteHost>198.51.100.9</NewRemoteHost>"), "remote host");
+  });
+
+  await test("getMapping reports the remote host back on the result", async () => {
+    const mapping = await withRouter("opnsense", (c) =>
+      c.getMapping({ public: 16132, remoteHost: "198.51.100.9" })
+    );
+    assert(mapping !== null, "mapping");
+    assertEqual(mapping!.public.host, "198.51.100.9", "echoed remote host");
+  });
+
+  await test("a lower-case protocol is upper-cased on the wire", async () => {
+    await withRouter("opnsense", (c) => c.removeMapping({ public: 7005, protocol: "udp" }));
+    const req = requests.find((r) => r.action === "DeletePortMapping");
+    assert(req!.body.includes("<NewProtocol>UDP</NewProtocol>"), "protocol upper-cased");
+  });
+
+  await test("getMappings filters on a partial description", async () => {
+    // The filter is a substring match, so a fragment of the description finds
+    // the entry and an unrelated fragment does not.
+    const found = await withRouter("opnsense", (c) => c.getMappings({ description: "Reserved" }));
+    assertEqual(found.length, 1, "a fragment matches");
+    const missed = await withRouter("opnsense", (c) => c.getMappings({ description: "nothing" }));
+    assertEqual(missed.length, 0, "an unrelated fragment does not");
+  });
+
+  await test("getMappings accepts a regular expression description", async () => {
+    const found = await withRouter("opnsense", (c) =>
+      c.getMappings({ description: /^FluxOS/ })
+    );
+    assertEqual(found.length, 1, "a regular expression matches");
+    const missed = await withRouter("opnsense", (c) => c.getMappings({ description: /^nope/ }));
+    assertEqual(missed.length, 0, "a non-matching expression filters everything");
+  });
+
+  await test("getStatusInfo reports uptime as a number", async () => {
+    const status = await withRouter("opnsense", (c) => c.getStatusInfo());
+    assert(Number.isFinite(status.uptime), `uptime should be numeric, got ${status.uptime}`);
+    assert(status.uptime > 0, "uptime is positive");
+  });
+
+  await test("getAll resolves device, capabilities and address together", async () => {
+    const all = await withRouter("opnsense", async (c) => {
+      const info = await c.getGateway();
+      return info.getAll();
+    });
+    assert(all.device !== null, "device");
+    assert(all.capabilities !== null, "capabilities");
+    assertEqual(all.localAddress, LOCAL_ADDRESS, "local address");
+  });
+
+  await test("a closed client refuses further work", async () => {
+    const restore = installFakeRouter("opnsense");
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+    try {
+      await client.getGateway();
+      client.close();
+      const err = await expectThrow(() => client.getGateway(), "getGateway after close");
+      assert(/closed/i.test((err as Error).message), `expected a closed error, got ${err}`);
+    } finally {
+      restore();
+    }
+  });
+
+  await test("close is safe to call more than once", async () => {
+    const restore = installFakeRouter("opnsense");
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+    try {
+      await client.getGateway();
+      client.close();
+      client.close();
+    } finally {
+      restore();
+    }
+  });
+
+  await test("url mode requires a local address", () => {
+    let threw = false;
+    try {
+      new Client({ url: DESCRIPTION_URL });
+    } catch (err) {
+      threw = true;
+      assert(/localAddress/.test((err as Error).message), "names the missing option");
+    }
+    assert(threw, "expected a constructor error");
+  });
+
+  await test("a device URL that is not http is refused", () => {
+    for (const bad of ["ftp://192.0.2.1/desc.xml", "192.0.2.1/desc.xml", ""]) {
+      let threw = false;
+      try {
+        new Device(bad);
+      } catch {
+        threw = true;
+      }
+      assert(threw, `expected ${JSON.stringify(bad)} to be refused`);
+    }
+  });
+
+  // ========================================
   // Local address resolution
   // ========================================
   console.log("\n=== Local address resolution ===\n");

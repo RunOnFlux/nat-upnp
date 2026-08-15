@@ -220,6 +220,23 @@ client.close();
 - SSDP Location header validated (HTTP only)
 - Device URL validated on construction
 
+## Testing
+
+```sh
+npm run test            # unit suite, against 73 captured routers
+npm run flux-test:igd2  # integration suite, against a gateway in Docker
+```
+
+Both run in CI on every push. The integration suite stands its own IGD gateway up in a container and runs against IGD v2 and then IGD v1 — see [test/igd2](test/igd2/README.md).
+
+`npm run flux-test` runs that same integration suite against **whatever real router the machine sits behind**, discovered over SSDP. It is a diagnostic for investigating one specific router, not part of the test plan, and it is not routine:
+
+- it creates and deletes port mappings in that router's table
+- one testcase adds an `iptables` rule blocking outbound SSDP on the host and removes it in a `finally`; kill the process at the wrong moment and the rule stays
+- it needs root, and it hangs rather than failing where there is no UPnP gateway at all
+
+Point it at a router deliberately, on a machine you are willing to have it touch.
+
 ## License
 
 [Blue Oak Model License 1.0.0](https://blueoakcouncil.org/license/1.0.0)

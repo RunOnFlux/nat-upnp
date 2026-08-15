@@ -1,8 +1,12 @@
 # A disposable IGD gateway for the integration suite
 
-`npm run flux-test` needs a real UPnP router. This stands one up in Docker, so the suite can be
-run on a workstation and — more to the point — against an **IGDv2** router, which the v2 code
-paths had never met.
+This is the integration test. It stands a gateway up in Docker, so the suite runs on a workstation
+and in CI, and — more to the point — against an **IGDv2** router, which the v2 code paths had
+never met.
+
+The suite can also be pointed at a real router with `npm run flux-test`, but that is a diagnostic
+for one specific router rather than something to run routinely: it writes to that router's mapping
+table and adds a temporary `iptables` rule on the host. Prefer this.
 
 ```sh
 npm run flux-test:igd2

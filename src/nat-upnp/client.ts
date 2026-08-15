@@ -326,7 +326,12 @@ export class Client implements IClient {
           port: parseInt(fieldValue(entry.NewExternalPort), 10) || 0,
         },
         private: { host, port: parseInt(fieldValue(entry.NewInternalPort), 10) || 0 },
-        protocol: protocol.toLowerCase(),
+        // The entry carries its own protocol; the requested one is only a
+        // fallback for a router that omits it. Taking it from the request
+        // would relabel anything that came back not matching the filter.
+        protocol: fieldValue(entry.NewProtocol)
+          ? fieldValue(entry.NewProtocol).toLowerCase()
+          : protocol.toLowerCase(),
         enabled: fieldValue(entry.NewEnabled) === "1",
         description: fieldValue(entry.NewDescription),
         ttl: parseInt(fieldValue(entry.NewLeaseTime), 10) || 0,

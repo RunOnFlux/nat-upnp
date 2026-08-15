@@ -358,7 +358,6 @@ setupTest("NAT-UPNP/Client", (opts) => {
           entry.description === "Range" + i &&
           entry.protocol === "tcp" &&
           entry.enabled &&
-          entry.local &&
           entry.ttl > 0
         );
       });

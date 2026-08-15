@@ -2565,6 +2565,21 @@ function getSoapFaultCode(xml: string): number | null {
     });
   }
 
+  await test("getMappingRange reads NewProtocol from the listing, not from the request", async () => {
+    // Every captured listing in the corpus is TCP-only, so asking for UDP is
+    // what separates a value read out of the router's answer from one copied
+    // off our own question. Requesting the protocol the router lists is
+    // precisely how that copy stays invisible.
+    const slug = "ubiquiti-udm-pro-max";
+    const mappings = await withRouter(slug, (c) =>
+      c.getMappingRange({ startPort: 1, endPort: 65535, protocol: "UDP" })
+    );
+    assert(mappings.length > 0, `${slug}: expected entries in the captured listing`);
+    for (const m of mappings) {
+      assertEqual(m.protocol, "tcp", `${slug}: port ${m.public.port} protocol comes from the listing`);
+    }
+  });
+
   await test("the captured v2 responses are the ones being served", async () => {
     // Guards the harness itself: the synthetic shapes must never take
     // precedence over a real capture, or the fleet data would go unused.

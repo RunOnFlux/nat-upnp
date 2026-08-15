@@ -3,6 +3,11 @@ import { setupTest } from "./index.flux-test";
 import { Client, Mapping, UpnpError } from "../src";
 import { execSync } from "node:child_process";
 
+// Set by test/igd2 only. A testcase that has to manufacture a conflict — claim
+// a port on behalf of another host, say — must never do that to whatever router
+// a developer or a node happens to sit behind.
+const disposableGateway = process.env.FLUX_UPNP_DISPOSABLE_GATEWAY === "1";
+
 setupTest("NAT-UPNP/Client", (opts) => {
   let client: Client;
   const globalPort: number[] = [];
@@ -433,6 +438,64 @@ setupTest("NAT-UPNP/Client", (opts) => {
       );
     } finally {
       await client.removeMapping({ public: result.reservedPort });
+    }
+  });
+
+  opts.run("v2 createAnyMapping — reserves a free port when the one asked for is taken", async () => {
+    const info = await client.getGateway();
+    const capabilities = await info.getCapabilities();
+    if (!capabilities?.supportsAddAnyPortMapping) {
+      console.log("  AddAnyPortMapping not advertised — rejection covered above");
+      return true;
+    }
+    if (!disposableGateway) {
+      console.log("  needs a port held by another host — staged only against the disposable gateway");
+      return true;
+    }
+
+    // This is the half of AddAnyPortMapping that AddPortMapping cannot do: on a
+    // conflict it picks a free port instead of faulting, and reports which.
+    // Holding the port for a different internal address is what forces it — the
+    // router hands the same port straight back to whoever already owns it.
+    const localAddress = await info.getLocalAddress();
+    const otherHost = localAddress.replace(/\.\d+$/, ".199");
+    if (otherHost === localAddress) {
+      console.log("  local address is the one we would squat with — skipping");
+      return true;
+    }
+
+    const contested = 41300;
+    await client.createMapping({
+      public: contested,
+      private: { host: otherHost, port: 8300 },
+      description: "Squatter",
+      ttl: 300,
+    });
+    console.log("  ", otherHost, "holds", contested);
+
+    let reservedPort = 0;
+    try {
+      const result = await client.createAnyMapping({
+        public: contested,
+        private: 8301,
+        description: "AnyPort",
+        ttl: 300,
+      });
+      reservedPort = result.reservedPort;
+      console.log("  Requested:", contested, "Reserved:", reservedPort);
+
+      const mapping = await client.getMapping({ public: reservedPort, protocol: "TCP" });
+      console.log("  Read back:", mapping?.public.port, "->", mapping?.private.host + ":" + mapping?.private.port);
+      return (
+        reservedPort > 0 &&
+        reservedPort !== contested &&
+        mapping !== null &&
+        mapping.private.host === localAddress &&
+        mapping.private.port === 8301
+      );
+    } finally {
+      if (reservedPort > 0) await client.removeMapping({ public: reservedPort });
+      await client.removeMapping({ public: contested });
     }
   });
 

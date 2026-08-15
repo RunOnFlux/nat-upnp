@@ -9,7 +9,8 @@
 #   ./test/igd2/igd2.sh test    run the integration suite from a client container
 #   ./test/igd2/igd2.sh shell   interactive shell on the LAN, suite mounted
 #   ./test/igd2/igd2.sh logs    follow the gateway's miniupnpd -d output
-#   ./test/igd2/igd2.sh down    remove the containers and networks
+#   ./test/igd2/igd2.sh down    remove the container and both networks
+#   ./test/igd2/igd2.sh url     print the gateway's description URL
 #
 # Everything lives in its own network namespace: the gateway rewrites nftables
 # rules inside its own container, never the host's.
@@ -141,5 +142,8 @@ case "${1:-}" in
   logs)  cmd_logs ;;
   down)  cmd_down ;;
   url)   echo "$DESCRIPTION_URL" ;;
-  *) sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  # Print the header comment up to the first non-comment line, so the block
+  # ends where it ends. A line count went stale the first time a subcommand was
+  # added, and truncated the usage mid-sentence.
+  *) sed -n '2,${/^#/!q;p;}' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

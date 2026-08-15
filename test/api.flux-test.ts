@@ -26,6 +26,19 @@ setupTest("NAT-UPNP/Client", (opts) => {
     }
   }
 
+  // Cleanup runs in a finally, where a throw would replace whatever error the
+  // testcase was actually reporting. A mapping that was never created is the
+  // one benign outcome; anything else is said out loud rather than swallowed.
+  async function removeQuietly(port: number) {
+    try {
+      await client.removeMapping({ public: port });
+    } catch (err) {
+      const code = err instanceof UpnpError ? err.code : null;
+      if (code === 714) return;
+      console.log("  cleanup: could not remove", port, "-", code ?? err);
+    }
+  }
+
   opts.runBefore(() => {
     client = new Client();
   });
@@ -328,16 +341,18 @@ setupTest("NAT-UPNP/Client", (opts) => {
     const ports = [base, base + 1, base + 2];
     const localAddress = await info.getLocalAddress();
 
-    for (let i = 0; i < ports.length; i++) {
-      await client.createMapping({
-        public: ports[i],
-        private: 8000 + i,
-        description: "Range" + i,
-        ttl: 300,
-      });
-    }
-
     try {
+      // Inside the try: a throw partway through setup must still reach the
+      // cleanup, or the mappings already made outlive the run.
+      for (let i = 0; i < ports.length; i++) {
+        await client.createMapping({
+          public: ports[i],
+          private: 8000 + i,
+          description: "Range" + i,
+          ttl: 300,
+        });
+      }
+
       const range = await client.getMappingRange({
         startPort: base,
         endPort: base + 10,
@@ -368,7 +383,7 @@ setupTest("NAT-UPNP/Client", (opts) => {
       });
     } finally {
       for (const port of ports) {
-        await client.removeMapping({ public: port });
+        await removeQuietly(port);
       }
     }
   });
@@ -383,26 +398,36 @@ setupTest("NAT-UPNP/Client", (opts) => {
 
     const base = 41100;
     const ports = [base, base + 1, base + 2];
-    for (let i = 0; i < ports.length; i++) {
-      await client.createMapping({
-        public: ports[i],
-        private: 8100 + i,
-        description: "DelRange" + i,
-        ttl: 300,
-      });
+
+    try {
+      for (let i = 0; i < ports.length; i++) {
+        await client.createMapping({
+          public: ports[i],
+          private: 8100 + i,
+          description: "DelRange" + i,
+          ttl: 300,
+        });
+      }
+
+      const before = await client.getMappings();
+      const createdCount = ports.filter((port) => before.some((m) => m.public.port === port)).length;
+      console.log("  Created", createdCount, "of", ports.length, "before the range delete");
+
+      await client.removeMappingRange({ startPort: base, endPort: base + 10, protocol: "TCP" });
+
+      const after = await client.getMappings();
+      const survivors = ports.filter((port) => after.some((m) => m.public.port === port));
+      console.log("  Survivors after the range delete:", survivors.length ? survivors.join(", ") : "none");
+
+      return createdCount === ports.length && survivors.length === 0;
+    } finally {
+      // The range delete is the thing under test, so it cannot be trusted to
+      // have done the cleaning. Whatever it left is removed here; the ports it
+      // did remove come back 714 and stay quiet.
+      for (const port of ports) {
+        await removeQuietly(port);
+      }
     }
-
-    const before = await client.getMappings();
-    const createdCount = ports.filter((port) => before.some((m) => m.public.port === port)).length;
-    console.log("  Created", createdCount, "of", ports.length, "before the range delete");
-
-    await client.removeMappingRange({ startPort: base, endPort: base + 10, protocol: "TCP" });
-
-    const after = await client.getMappings();
-    const survivors = ports.filter((port) => after.some((m) => m.public.port === port));
-    console.log("  Survivors after the range delete:", survivors.length ? survivors.join(", ") : "none");
-
-    return createdCount === ports.length && survivors.length === 0;
   });
 
   opts.run("v2 createAnyMapping — the reserved port is really mapped", async () => {
@@ -437,7 +462,10 @@ setupTest("NAT-UPNP/Client", (opts) => {
         mapping.description === "AnyPort"
       );
     } finally {
-      await client.removeMapping({ public: result.reservedPort });
+      // A router that answers without NewReservedPort parses to 0, and asking
+      // to delete port 0 faults — out of a finally, that fault would stand in
+      // for the missing-port failure this testcase exists to report.
+      if (result.reservedPort > 0) await removeQuietly(result.reservedPort);
     }
   });
 
@@ -494,8 +522,8 @@ setupTest("NAT-UPNP/Client", (opts) => {
         mapping.private.port === 8301
       );
     } finally {
-      if (reservedPort > 0) await client.removeMapping({ public: reservedPort });
-      await client.removeMapping({ public: contested });
+      if (reservedPort > 0) await removeQuietly(reservedPort);
+      await removeQuietly(contested);
     }
   });
 

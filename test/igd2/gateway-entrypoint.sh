@@ -4,8 +4,6 @@
 # namespace. LAN_IF faces the test client; WAN_IF is the pretend uplink whose
 # address is reported as the public IP.
 
-LAN_IF=${LAN_IF:-eth0}
-WAN_IF=${WAN_IF:-eth1}
 HTTP_PORT=${HTTP_PORT:-5000}
 FORCE_IGD_V1=${FORCE_IGD_V1:-no}
 
@@ -14,21 +12,25 @@ FORCE_IGD_V1=${FORCE_IGD_V1:-no}
 if [ "$FORCE_IGD_V1" = yes ]; then IGD_VERSION=1; else IGD_VERSION=2; fi
 FRIENDLY_NAME=${FRIENDLY_NAME:-Flux IGDv$IGD_VERSION Test Gateway}
 
-iface_ip() {
-  ip -4 -o addr show dev "$1" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1
+# Find each leg by the address it was pinned to, never by interface name.
+# Docker does not promise that the network given to `create` becomes eth0 and a
+# later `network connect` becomes eth1 — the order varies between starts of the
+# same container, and a swapped pair points miniupnpd's uplink at its own LAN.
+iface_for_ip() {
+  ip -4 -o addr show 2>/dev/null | awk -v want="$1" '$4 ~ "^"want"/" { print $2; exit }'
 }
 
-LAN_IP=$(iface_ip "$LAN_IF")
-WAN_IP=$(iface_ip "$WAN_IF")
-
-if [ -z "$LAN_IP" ]; then
-  echo "no IPv4 address on LAN interface $LAN_IF" >&2
-  ip -4 addr >&2
+if [ -z "${LAN_IP:-}" ] || [ -z "${WAN_IP:-}" ]; then
+  echo "LAN_IP and WAN_IP must both be set — they are how the legs are identified" >&2
   exit 1
 fi
-if [ -z "$WAN_IP" ]; then
-  echo "no IPv4 address on WAN interface $WAN_IF — attach the WAN network before starting" >&2
-  ip -4 addr >&2
+
+LAN_IF=$(iface_for_ip "$LAN_IP")
+WAN_IF=$(iface_for_ip "$WAN_IP")
+
+if [ -z "$LAN_IF" ] || [ -z "$WAN_IF" ]; then
+  echo "expected LAN $LAN_IP and WAN $WAN_IP; both networks must be attached before start" >&2
+  ip -4 -o addr show >&2
   exit 1
 fi
 

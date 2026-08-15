@@ -63,7 +63,7 @@ cmd_up() {
     --cap-add NET_RAW \
     --sysctl net.ipv4.ip_forward=1 \
     --network "$LAN_NET" --ip "$GW_LAN_IP" \
-    -e LAN_IF=eth0 -e WAN_IF=eth1 -e HTTP_PORT="$HTTP_PORT" \
+    -e LAN_IP="$GW_LAN_IP" -e WAN_IP="$GW_WAN_IP" -e HTTP_PORT="$HTTP_PORT" \
     -e FORCE_IGD_V1="$force_v1" \
     "$GW_IMAGE" >/dev/null
 

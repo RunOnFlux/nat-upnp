@@ -23,6 +23,7 @@
     "watch": "tsc --watch",
     "test": "npm run build && node ./build/test/unit.test.js",
     "flux-test": "npm run build && node ./build/test/index.flux-test.js",
+    "flux-test:igd2": "npm run build && ./test/igd2/igd2.sh run",
     "prepare": "npm run build",
     "test:mutation": "stryker run"
   },

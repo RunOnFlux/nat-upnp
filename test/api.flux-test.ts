@@ -306,6 +306,137 @@ setupTest("NAT-UPNP/Client", (opts) => {
     return true;
   });
 
+  // The testcase above only proves the "not supported" branch on a v1 router.
+  // These three run the v2 write path for real, and stand down on a v1 router
+  // rather than duplicating the rejection assertions. test/igd2 stands up a
+  // gateway that reaches them.
+
+  opts.run("v2 getMappingRange — parse a real NewPortListing", async () => {
+    const info = await client.getGateway();
+    const capabilities = await info.getCapabilities();
+    if (!capabilities?.supportsGetListOfPortMappings) {
+      console.log("  GetListOfPortMappings not advertised — rejection covered above");
+      return true;
+    }
+
+    const base = 41000;
+    const ports = [base, base + 1, base + 2];
+    const localAddress = await info.getLocalAddress();
+
+    for (let i = 0; i < ports.length; i++) {
+      await client.createMapping({
+        public: ports[i],
+        private: 8000 + i,
+        description: "Range" + i,
+        ttl: 300,
+      });
+    }
+
+    try {
+      const range = await client.getMappingRange({
+        startPort: base,
+        endPort: base + 10,
+        protocol: "TCP",
+      });
+      console.log("  Entries returned:", range.length);
+      for (const m of range) {
+        console.log(
+          "    ", m.public.port, "->", m.private.host + ":" + m.private.port,
+          "desc:", m.description, "ttl:", m.ttl, "local:", m.local
+        );
+      }
+
+      return ports.every((port, i) => {
+        const entry = range.find((m) => m.public.port === port);
+        if (!entry) {
+          console.log("  Port", port, "missing from the listing");
+          return false;
+        }
+        return (
+          entry.private.port === 8000 + i &&
+          entry.private.host === localAddress &&
+          entry.description === "Range" + i &&
+          entry.protocol === "tcp" &&
+          entry.enabled &&
+          entry.local &&
+          entry.ttl > 0
+        );
+      });
+    } finally {
+      for (const port of ports) {
+        await client.removeMapping({ public: port });
+      }
+    }
+  });
+
+  opts.run("v2 removeMappingRange — delete a real range", async () => {
+    const info = await client.getGateway();
+    const capabilities = await info.getCapabilities();
+    if (!capabilities?.supportsDeletePortMappingRange) {
+      console.log("  DeletePortMappingRange not advertised — rejection covered above");
+      return true;
+    }
+
+    const base = 41100;
+    const ports = [base, base + 1, base + 2];
+    for (let i = 0; i < ports.length; i++) {
+      await client.createMapping({
+        public: ports[i],
+        private: 8100 + i,
+        description: "DelRange" + i,
+        ttl: 300,
+      });
+    }
+
+    const before = await client.getMappings();
+    const createdCount = ports.filter((port) => before.some((m) => m.public.port === port)).length;
+    console.log("  Created", createdCount, "of", ports.length, "before the range delete");
+
+    await client.removeMappingRange({ startPort: base, endPort: base + 10, protocol: "TCP" });
+
+    const after = await client.getMappings();
+    const survivors = ports.filter((port) => after.some((m) => m.public.port === port));
+    console.log("  Survivors after the range delete:", survivors.length ? survivors.join(", ") : "none");
+
+    return createdCount === ports.length && survivors.length === 0;
+  });
+
+  opts.run("v2 createAnyMapping — the reserved port is really mapped", async () => {
+    const info = await client.getGateway();
+    const capabilities = await info.getCapabilities();
+    if (!capabilities?.supportsAddAnyPortMapping) {
+      console.log("  AddAnyPortMapping not advertised — rejection covered above");
+      return true;
+    }
+
+    // A router may hand back the port asked for or pick another; the contract
+    // is only that whatever it reserves is the port that ends up mapped.
+    const requested = 41200;
+    const result = await client.createAnyMapping({
+      public: requested,
+      private: 8200,
+      description: "AnyPort",
+      ttl: 300,
+    });
+    console.log("  Requested:", requested, "Reserved:", result.reservedPort);
+
+    try {
+      const mapping = await client.getMapping({
+        public: result.reservedPort,
+        protocol: "TCP",
+      });
+      console.log("  Read back:", mapping?.public.port, "->", mapping?.private.port, mapping?.description);
+      return (
+        result.reservedPort > 0 &&
+        mapping !== null &&
+        mapping.private.port === 8200 &&
+        mapping.description === "AnyPort"
+      );
+    } finally {
+      await client.removeMapping({ public: result.reservedPort });
+    }
+  });
+
   // ==========================================
   // SSDP bypass and caching
   // ==========================================

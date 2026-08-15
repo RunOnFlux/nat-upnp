@@ -14,9 +14,15 @@ npm run flux-test:igd2
 
 That builds both images, creates the networks, and runs the suite against IGDv2 and then IGDv1 —
 the same daemon reporting a v1 description, which is how the "not supported" branch of the
-capability gate gets exercised. Both modes pass. It tears down after a clean run and **leaves the
-gateway standing after a failure**, so `igd2.sh logs` still has the miniupnpd output for whatever
-broke.
+capability gate gets exercised. Both modes pass.
+
+After a clean run it removes the container and both networks. It **leaves the gateway standing
+after a failure**, so `igd2.sh logs` still has the miniupnpd output for whatever broke.
+
+The two images it builds are left in place — about 400 MB, and they are the whole reason a second
+run is quick, since they carry the Debian package installs. Nothing is running and nothing holds
+an address; remove them with `docker rmi natupnp-igd2-gateway natupnp-igd2-client` when you want
+the space back.
 
 `igd2.sh up [--v1]`, `test`, `shell`, `logs` and `down` drive the same thing by hand.
 

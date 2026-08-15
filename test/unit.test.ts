@@ -1037,8 +1037,14 @@ function getSoapFaultCode(xml: string): number | null {
       // of comparing the parser against itself. The surveyed corpus gets the
       // same check against its recorded serviceType; these thirteen have no
       // generated expectation to point at.
+      //
+      // descParser, not the library's own parser: the expectation has to be
+      // derived independently or a parsing bug would hide itself. It still has
+      // to strip namespace prefixes, though — bare XMLParser defaults leave
+      // them on, and a prefixed description would then advertise nothing and
+      // fail this for a reason that has nothing to do with service selection.
       const advertised = new Device(DESCRIPTION_URL)
-        .parseDescription(new XMLParser().parse(loadFixture(`${router}-rootdesc.xml`)).root)
+        .parseDescription(descParser.parse(loadFixture(`${router}-rootdesc.xml`)).root)
         .services.map((s: { serviceType?: string }) => s.serviceType);
       const preferred = [
         "urn:schemas-upnp-org:service:WANIPConnection:2",

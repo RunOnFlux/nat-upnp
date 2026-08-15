@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, existsSync, readdirSync } from "fs";
 import { join } from "path";
 import { XMLParser } from "fast-xml-parser";
 import axiosModule from "axios";
@@ -1032,7 +1032,25 @@ function getSoapFaultCode(xml: string): number | null {
         v2Routers.has(router),
         `${router}: only the v2 routers advertise AddAnyPortMapping`
       );
-      assertEqual(caps!.serviceType, caps!.serviceType, `${router}: serviceType present`);
+      // Read the expectation out of the router's own description and apply the
+      // documented preference order, so this checks the selection rule instead
+      // of comparing the parser against itself. The surveyed corpus gets the
+      // same check against its recorded serviceType; these thirteen have no
+      // generated expectation to point at.
+      const advertised = new Device(DESCRIPTION_URL)
+        .parseDescription(new XMLParser().parse(loadFixture(`${router}-rootdesc.xml`)).root)
+        .services.map((s: { serviceType?: string }) => s.serviceType);
+      const preferred = [
+        "urn:schemas-upnp-org:service:WANIPConnection:2",
+        "urn:schemas-upnp-org:service:WANIPConnection:1",
+        "urn:schemas-upnp-org:service:WANPPPConnection:1",
+      ].find((serviceType) => advertised.includes(serviceType));
+      assert(!!preferred, `${router}: description advertises no WAN service`);
+      assertEqual(
+        caps!.serviceType,
+        preferred,
+        `${router}: picks the highest-preference WAN service its description offers`
+      );
       assertEqual(
         caps!.serviceVersion,
         Number(caps!.serviceType.slice(-1)),
@@ -2585,8 +2603,11 @@ function getSoapFaultCode(xml: string): number | null {
   // ========================================
   console.log(`\n${"=".repeat(50)}`);
   console.log(`Results: \x1b[32m${passed} passed\x1b[0m, \x1b[${failed > 0 ? "31" : "32"}m${failed} failed\x1b[0m`);
-  console.log(`Routers tested: ${routers.length}`);
-  console.log(`Fixture files: 170`);
+  console.log(
+    `Routers tested: ${routers.length + surveyedRouters.length}` +
+      ` (${routers.length} curated + ${surveyedRouters.length} surveyed)`
+  );
+  console.log(`Fixture files: ${readdirSync(fixturesDir).length}`);
   console.log(`${"=".repeat(50)}\n`);
 
   if (errors.length > 0) {

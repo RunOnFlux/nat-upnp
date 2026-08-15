@@ -23,6 +23,22 @@ jobs:
       - run: npm run build
       - run: node ./build/test/unit.test.js
 
+  # The integration suite could previously only run on a Flux node, by hand, as
+  # root. test/igd2 gives it a gateway in Docker, so it runs here on every push
+  # — once, not across the matrix; what it exercises is the router, not Node.
+  # Deliberately not a gate on publish: it pulls images, so a registry outage
+  # would block a release for a reason unrelated to the code.
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24.x"
+      - run: npm ci
+      - run: npm run flux-test:igd2
+
   publish:
     needs: build-and-test
     if: github.event_name == 'release'

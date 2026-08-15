@@ -92,8 +92,6 @@ cmd_test() {
     --cap-add NET_RAW \
     -v "$REPO:/work" \
     -w /work \
-    -e FLUX_UPNP_URL="${FLUX_UPNP_URL-}" \
-    -e FLUX_UPNP_LOCAL_ADDRESS="${FLUX_UPNP_LOCAL_ADDRESS-}" \
     -e FLUX_UPNP_DISPOSABLE_GATEWAY=1 \
     "$CLIENT_IMAGE" \
     node ./build/test/index.flux-test.js

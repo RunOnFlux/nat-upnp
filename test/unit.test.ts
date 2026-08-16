@@ -1728,6 +1728,52 @@ function getSoapFaultCode(xml: string): number | null {
     }
   });
 
+  await test("a CDATA listing survives a neighbour's XML-special description", async () => {
+    // CDATA delivers the inner document as-is. Decoding it before parsing
+    // turns escaped text live, so one '<' in any entry's description — a
+    // neighbouring client's, not ours to control — truncated the listing at
+    // that entry and returned the remainder as if complete.
+    setV2Overrides({
+      listing: portListing([
+        { external: 1001, internal: 1001, host: "192.168.1.50", description: "Sonos &lt;TV&gt; &amp; Hub", ttl: 3600 },
+        { external: 1002, internal: 1002, host: "192.168.1.51", description: "second", ttl: 3600 },
+        { external: 1003, internal: 1003, host: "192.168.1.52", description: "third", ttl: 0 },
+      ]),
+    });
+    try {
+      const mappings = await withRouter("sercomm-gpon", (c) =>
+        c.getMappingRange({ startPort: 1, endPort: 65535 })
+      );
+      assertEqual(mappings.length, 3, "every entry survives");
+      assertEqual(mappings[0].description, "Sonos <TV> & Hub", "the special description reads back decoded");
+      assertEqual(mappings[0].ttl, 3600, "its lease survives too");
+      assertEqual(mappings[2].public.port, 1003, "entries after it are not dropped");
+    } finally {
+      setV2Overrides({});
+    }
+  });
+
+  await test("an escaped listing's description reads back as written", async () => {
+    // On the escaped dialect the wrapper decode was the only decode, so the
+    // field itself came back one entity layer on: Flux_A&amp;B_node.
+    setV2Escaped(true);
+    setV2Overrides({
+      listing: portListing([
+        { external: 1001, internal: 1001, host: "192.168.1.50", description: "Flux_A&amp;B_node", ttl: 3600 },
+      ]),
+    });
+    try {
+      const mappings = await withRouter("sercomm-gpon", (c) =>
+        c.getMappingRange({ startPort: 1, endPort: 65535 })
+      );
+      assertEqual(mappings.length, 1, "the entry is listed");
+      assertEqual(mappings[0].description, "Flux_A&B_node", "written and read values agree");
+    } finally {
+      setV2Escaped(false);
+      setV2Overrides({});
+    }
+  });
+
   await test("getMappingRange returns nothing when the listing is absent", async () => {
     setV2Overrides({ listing: null });
     try {

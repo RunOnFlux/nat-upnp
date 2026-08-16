@@ -310,11 +310,17 @@ export class Client implements IClient {
     const portListing = fieldValue(res.NewPortListing);
     if (!portListing) return [];
 
-    // NewPortListing carries an XML document inside a string, so it arrives
-    // escaped. The shared parser leaves entities alone for XXE protection, so
-    // without decoding first the inner parse finds no elements and every router
-    // looks like it has no mappings at all.
-    const parsed = xmlParser.parse(decodeXmlEntities(portListing));
+    // NewPortListing embeds an XML document in a string, and routers wrap it
+    // two ways: CDATA (Ubiquiti, OpenWRT, Debian) delivers the document
+    // as-is, while the escaped dialect delivers it with every '<' entity-
+    // escaped. Only the escaped form gets the wrapper decode — decoding a
+    // real document turns escaped text in its fields into live markup and
+    // truncates the parse at the first '<' in anyone's description. A raw
+    // '<' in the payload means it is already a document.
+    const document = portListing.includes("<")
+      ? portListing
+      : decodeXmlEntities(portListing);
+    const parsed = xmlParser.parse(document);
     const list = parsed?.PortMappingList?.PortMappingEntry;
     if (!list) return [];
 
@@ -334,7 +340,9 @@ export class Client implements IClient {
           ? fieldValue(entry.NewProtocol).toLowerCase()
           : protocol.toLowerCase(),
         enabled: fieldValue(entry.NewEnabled) === "1",
-        description: fieldValue(entry.NewDescription),
+        // The free-text field decodes after the parse, like the other two
+        // read paths — the wrapper decode no longer reaches into fields.
+        description: decodeXmlEntities(fieldValue(entry.NewDescription)),
         ttl: parseInt(fieldValue(entry.NewLeaseTime), 10) || 0,
         local: isLocal(host, localAddress),
       };

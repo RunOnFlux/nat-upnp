@@ -216,16 +216,14 @@ export class Device implements IDevice {
     return this.capabilitiesPromise;
   }
 
-  private async buildCapabilities(): Promise<ServiceCapabilities | null> {
+  private async buildCapabilities(): Promise<ServiceCapabilities> {
     const service = await this.resolveService();
 
-    let parsed: Record<string, unknown>;
-    try {
-      const { data } = await axios.get(service.SCPDURL, axiosDefaults);
-      parsed = xmlParser.parse(data) as Record<string, unknown>;
-    } catch {
-      return null;
-    }
+    // A fetch failure must reject, not resolve: getCapabilities clears its
+    // cache only on rejection, and a swallowed failure here would pin
+    // "capabilities unknown" for the life of this Device.
+    const { data } = await axios.get(service.SCPDURL, axiosDefaults);
+    const parsed = xmlParser.parse(data) as Record<string, unknown>;
 
     const scpd = parsed as any;
     const actionList = scpd?.scpd?.actionList?.action;

@@ -1946,6 +1946,36 @@ function getSoapFaultCode(xml: string): number | null {
     assert(caps!.serviceType.endsWith(":2"), `expected a v2 service, got ${caps!.serviceType}`);
   });
 
+  await test("a failed SCPD fetch is retried on the next call", async () => {
+    // One dropped response must not disable the v2 actions for the life of
+    // the device: the failure has to reach the handler that clears the cache,
+    // or "cannot verify support" becomes permanent under cacheGateway: true.
+    const restore = installFakeRouter("opnsense");
+    const fakeGet = axiosModule.get;
+    let scpdAttempts = 0;
+    let failNext = true;
+    (axiosModule as any).get = async (url: string) => {
+      if (url !== DESCRIPTION_URL) {
+        scpdAttempts += 1;
+        if (failNext) {
+          failNext = false;
+          throw new Error("socket hang up");
+        }
+      }
+      return fakeGet(url);
+    };
+    const device = new Device(DESCRIPTION_URL);
+    try {
+      assertEqual(await device.getCapabilities(), null, "the failing fetch reports null");
+      const recovered = await device.getCapabilities();
+      assert(recovered !== null, "the next call retries instead of serving the cached failure");
+      assertEqual(scpdAttempts, 2, "the SCPD was fetched again");
+    } finally {
+      (axiosModule as any).get = fakeGet;
+      restore();
+    }
+  });
+
   await test("a description advertising no usable service is refused", async () => {
     const restore = installFakeRouter("opnsense");
     const realGet = axiosModule.get;

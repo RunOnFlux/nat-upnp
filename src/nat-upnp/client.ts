@@ -26,18 +26,35 @@ export class UpnpInfo {
     this.localAddressOverride = localAddressOverride || null;
   }
 
-  /** Fetch and cache device info from rootDesc.xml. Returns null on failure. */
+  /**
+   * Fetch and cache device info from rootDesc.xml. Returns null on failure —
+   * and a failure is never cached: the Device layer retries after one, and
+   * pinning its null answer here would hold "unavailable" for the life of
+   * this UpnpInfo, which in url mode and cacheGateway mode is the life of
+   * the client.
+   */
   getDevice(): Promise<GatewayDevice | null> {
     if (!this.devicePromise) {
-      this.devicePromise = this.gateway.getDeviceInfo();
+      this.devicePromise = this.gateway.getDeviceInfo().then((device) => {
+        if (device === null) {
+          this.devicePromise = null;
+        }
+        return device;
+      });
     }
     return this.devicePromise;
   }
 
-  /** Fetch and cache service capabilities from SCPD. Returns null on failure. */
+  /** Fetch and cache service capabilities from SCPD. Returns null on failure;
+   * a failure is never cached, for the same reason as getDevice. */
   getCapabilities(): Promise<ServiceCapabilities | null> {
     if (!this.capabilitiesPromise) {
-      this.capabilitiesPromise = this.gateway.getCapabilities();
+      this.capabilitiesPromise = this.gateway.getCapabilities().then((capabilities) => {
+        if (capabilities === null) {
+          this.capabilitiesPromise = null;
+        }
+        return capabilities;
+      });
     }
     return this.capabilitiesPromise;
   }

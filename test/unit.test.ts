@@ -2074,6 +2074,66 @@ function getSoapFaultCode(xml: string): number | null {
     }
   });
 
+  await test("a failed SCPD fetch is not pinned by the gateway info cache", async () => {
+    // The Device layer retries after a failure, but the UpnpInfo wrapper the
+    // client actually consults cached the null answer above it — so in url
+    // mode and cacheGateway mode one transient blip disabled every v2 action
+    // until process restart.
+    const restore = installFakeRouter("sercomm-gpon");
+    const fakeGet = axiosModule.get;
+    let scpdAttempts = 0;
+    let failNext = true;
+    (axiosModule as any).get = async (url: string) => {
+      if (url !== DESCRIPTION_URL) {
+        scpdAttempts += 1;
+        if (failNext) {
+          failNext = false;
+          throw new Error("socket hang up");
+        }
+      }
+      return fakeGet(url);
+    };
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+    try {
+      const err = await expectThrow(
+        () => client.removeMappingRange({ startPort: 16137, endPort: 16137 }),
+        "v2 action while the SCPD fetch fails"
+      );
+      assert(/SCPD unavailable/.test((err as Error).message), `got: ${(err as Error).message}`);
+      const res = await client.removeMappingRange({ startPort: 16137, endPort: 16137 });
+      assert(res !== undefined, "the next call retries and succeeds");
+      assertEqual(scpdAttempts, 2, "the SCPD was fetched again through the client path");
+    } finally {
+      (axiosModule as any).get = fakeGet;
+      client.close();
+      restore();
+    }
+  });
+
+  await test("a failed device-info fetch is not pinned by the gateway info cache", async () => {
+    const restore = installFakeRouter("opnsense");
+    const fakeGet = axiosModule.get;
+    let failNext = true;
+    (axiosModule as any).get = async (url: string) => {
+      if (url === DESCRIPTION_URL && failNext) {
+        failNext = false;
+        throw new Error("socket hang up");
+      }
+      return fakeGet(url);
+    };
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+    try {
+      const info = await client.getGateway();
+      assertEqual(await info.getDevice(), null, "the failing fetch reports null");
+      const device = await info.getDevice();
+      assert(device !== null, "the next call asks again");
+    } finally {
+      (axiosModule as any).get = fakeGet;
+      client.close();
+      restore();
+    }
+  });
+
   await test("a description advertising no usable service is refused", async () => {
     const restore = installFakeRouter("opnsense");
     const realGet = axiosModule.get;

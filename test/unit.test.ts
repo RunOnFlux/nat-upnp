@@ -2071,6 +2071,17 @@ function getSoapFaultCode(xml: string): number | null {
     });
   });
 
+  await test("discovery reports the environment's failure, not a timeout", async () => {
+    // EADDRINUSE is fixable on the caller's machine; "no router here" is not.
+    // The generic timeout message erased that difference, and FluxOS turns it
+    // into upnpMachine = false.
+    await withDiscovery({ timeout: 400 }, async (client) => {
+      FakeSocket.failNextBind = true;
+      const err = await expectThrow(() => client.getGateway(), "discovery on a failing socket");
+      assertEqual((err as Error).message, "EADDRINUSE", "the underlying error surfaces");
+    });
+  });
+
   await test("a cached gateway is not rediscovered", async () => {
     await withDiscovery({ cacheGateway: true }, async (client, sockets, respond) => {
       const pending = client.getGateway();
@@ -2575,6 +2586,20 @@ function getSoapFaultCode(xml: string): number | null {
     } finally {
       fake.restore();
     }
+  });
+
+  await test("a socket failure reaches the search that is waiting on it", async () => {
+    await withSsdp(async (ssdp) => {
+      FakeSocket.failNextBind = true;
+      const emitter = ssdp.search(IGD);
+      let heard: Error | null = null;
+      emitter.on("error", (err) => {
+        heard = err;
+      });
+      await settle();
+      assert(heard !== null, "the bind failure is delivered to the search");
+      assertEqual((heard as unknown as Error).message, "EADDRINUSE", "the real error arrives");
+    });
   });
 
   await test("a bind failure leaves no socket behind", async () => {

@@ -66,12 +66,24 @@ export class Ssdp implements ISsdp {
       }
     });
 
-    socket.once("error", () => {
+    // `on`, not `once`: a second error on a dead socket must land here too,
+    // or it is an unhandled "error" event and the process dies.
+    socket.on("error", (err) => {
       this.bound = false;
       if (this.socket === socket) {
         this.socket = null;
       }
       try { socket.close(); } catch { /* already closed */ }
+
+      // The real failure goes to every search waiting on this socket —
+      // queued behind the bind or already subscribed. Silence here left
+      // EADDRINUSE indistinguishable from "no router answered": the
+      // caller's timer expired and reported a router-less network.
+      const pending = this.pendingSearches.splice(0);
+      for (const [, emitter] of pending) {
+        emitError(emitter, err);
+      }
+      emitError(this.ssdpEmitter, err);
     });
 
     socket.bind(this.sourcePort);
@@ -119,10 +131,17 @@ export class Ssdp implements ISsdp {
       emitter!.emit("device", headers);
     };
 
+    const onerror = (err: Error) => {
+      if (ended) return;
+      emitError(emitter!, err);
+    };
+
     this.ssdpEmitter.on("device", ondevice);
+    this.ssdpEmitter.on("error", onerror);
 
     emitter.once("end", () => {
       this.ssdpEmitter.removeListener("device", ondevice);
+      this.ssdpEmitter.removeListener("error", onerror);
       ended = true;
     });
 
@@ -143,6 +162,17 @@ export class Ssdp implements ISsdp {
       } catch { /* already closed */ }
       this.socket = null;
     }
+  }
+}
+
+/**
+ * Deliver an error only where someone is listening: an unhandled "error"
+ * event throws, so a caller who never subscribed keeps the timeout behaviour
+ * instead of gaining a crash.
+ */
+function emitError(emitter: EventEmitter, err: Error): void {
+  if (emitter.listenerCount("error") > 0) {
+    emitter.emit("error", err);
   }
 }
 
@@ -167,12 +197,18 @@ export default Ssdp;
 
 type SearchArgs = [Record<string, string>];
 export type SearchCallback = (...args: SearchArgs) => void;
-type SearchEvent = <E extends Events>(
-  ev: E,
-  ...args: E extends "device" ? SearchArgs : []
-) => boolean;
-type Events = "device" | "end";
-type Event<E extends Events> = E extends "device" ? SearchCallback : () => void;
+type EventArgs<E extends Events> = E extends "device"
+  ? SearchArgs
+  : E extends "error"
+    ? [Error]
+    : [];
+type SearchEvent = <E extends Events>(ev: E, ...args: EventArgs<E>) => boolean;
+type Events = "device" | "end" | "error";
+type Event<E extends Events> = E extends "device"
+  ? SearchCallback
+  : E extends "error"
+    ? (err: Error) => void
+    : () => void;
 type EventListener<T> = <E extends Events>(ev: E, callback: Event<E>) => T;
 
 export interface SsdpEmitter extends EventEmitter {

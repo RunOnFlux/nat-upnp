@@ -402,6 +402,23 @@ export class Client implements IClient {
           reject(err instanceof Error ? err : new Error(String(err)));
         }
       });
+
+      // A socket failure is answered immediately with the real error —
+      // EADDRINUSE is fixable on this machine, "no router here" is not, and
+      // waiting for the timer to expire erased that difference. A cached
+      // gateway is still served, exactly as the timeout path does.
+      p.on("error", (err) => {
+        if (resolved) return;
+        resolved = true;
+        p.emit("end");
+        clearTimeout(timeout);
+
+        if (this.cachedInfo) {
+          resolve(this.cachedInfo);
+          return;
+        }
+        reject(err);
+      });
     });
 
     // Clean up SSDP socket after discovery (success or failure) — no leaks.

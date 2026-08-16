@@ -219,7 +219,7 @@ export class Client implements IClient {
       private: { host, port: parseInt(fieldValue(res.NewInternalPort), 10) || 0 },
       protocol: protocol.toLowerCase(),
       enabled: fieldValue(res.NewEnabled) === "1",
-      description: fieldValue(res.NewPortMappingDescription),
+      description: decodeXmlEntities(fieldValue(res.NewPortMappingDescription)),
       ttl: parseInt(fieldValue(res.NewLeaseDuration), 10) || 0,
       local: isLocal(host, localAddress),
     };
@@ -543,7 +543,10 @@ function parseMapping(res: any, localAddress: string): Mapping {
     private: { host, port: parseInt(fieldValue(res.NewInternalPort), 10) || 0 },
     protocol: fieldValue(res.NewProtocol) ? fieldValue(res.NewProtocol).toLowerCase() : "tcp",
     enabled: fieldValue(res.NewEnabled) === "1",
-    description: fieldValue(res.NewPortMappingDescription),
+    // Descriptions are escaped on the way out and the SOAP parser leaves
+    // entities alone for XXE protection, so the free-text field is decoded
+    // here — otherwise a description never reads back as it was written.
+    description: decodeXmlEntities(fieldValue(res.NewPortMappingDescription)),
     ttl: parseInt(fieldValue(res.NewLeaseDuration), 10) || 0,
     local: isLocal(host, localAddress),
   };

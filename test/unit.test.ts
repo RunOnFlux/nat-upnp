@@ -1466,6 +1466,50 @@ function getSoapFaultCode(xml: string): number | null {
     assert(res !== undefined, "string ports have always been accepted");
   });
 
+  await test("a description with an entity round-trips, and its filter matches", async () => {
+    // Outbound descriptions are XML-escaped and the SOAP parser leaves
+    // entities alone for XXE protection, so without decoding on read a
+    // mapping written as Flux_A&B_node listed as Flux_A&amp;B_node — and a
+    // filter on the value actually written found nothing.
+    const withEntity = () => ({
+      data: loadFixture("opnsense-soap-GetGenericPortMappingEntry.xml").replace(
+        /<NewPortMappingDescription>[^<]*</,
+        "<NewPortMappingDescription>Flux_A&amp;B_node<"
+      ),
+    });
+    const mappings = await withWalkIndexAnswering(0, withEntity, (c) => c.getMappings());
+    assertEqual(mappings[0].description, "Flux_A&B_node", "read back as written");
+    const filtered = await withWalkIndexAnswering(0, withEntity, (c) =>
+      c.getMappings({ description: "Flux_A&B_node" })
+    );
+    assertEqual(filtered.length, 1, "the filter matches the written description");
+  });
+
+  await test("getMapping decodes the description the same way", async () => {
+    const restore = installFakeRouter("opnsense");
+    const fakePost = axiosModule.post;
+    (axiosModule as any).post = async (url: string, body: string, config: any) => {
+      const res: any = await fakePost(url, body, config);
+      if (/GetSpecificPortMappingEntry/.test(String(config.headers.SOAPAction))) {
+        res.data = res.data.replace(
+          /<NewPortMappingDescription>[^<]*</,
+          "<NewPortMappingDescription>Flux_A&amp;B_node<"
+        );
+      }
+      return res;
+    };
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+    try {
+      const mapping = await client.getMapping({ public: 16132 });
+      assert(mapping !== null, "the mapping is found");
+      assertEqual(mapping!.description, "Flux_A&B_node", "entities are decoded on read");
+    } finally {
+      client.close();
+      (axiosModule as any).post = fakePost;
+      restore();
+    }
+  });
+
   await test("a shapeless response mid-walk is an error, not the end of the table", async () => {
     // A response with no GetGenericPortMappingEntryResponse in it is not how
     // any router says "no more entries" — that is always a fault.

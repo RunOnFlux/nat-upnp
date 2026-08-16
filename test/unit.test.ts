@@ -2021,6 +2021,37 @@ function getSoapFaultCode(xml: string): number | null {
     }
   });
 
+  await test("a hostile entity declaration is never expanded", async () => {
+    // processEntities: false is the XXE defence. Every entity the suite
+    // otherwise parses converges to the same value with the flag on or off,
+    // so flipping it — the exact security regression the configuration
+    // exists to prevent — used to pass the whole suite.
+    const restore = installFakeRouter("opnsense");
+    const realPost = axiosModule.post;
+    const hostile =
+      '<?xml version="1.0"?>' +
+      '<!DOCTYPE s:Envelope [<!ENTITY flux "LEAKED">]>' +
+      '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>' +
+      '<u:GetSpecificPortMappingEntryResponse xmlns:u="urn:schemas-upnp-org:service:WANIPConnection:1">' +
+      "<NewInternalPort>16132</NewInternalPort>" +
+      "<NewInternalClient>172.16.32.143</NewInternalClient>" +
+      "<NewEnabled>1</NewEnabled>" +
+      "<NewPortMappingDescription>&flux;</NewPortMappingDescription>" +
+      "<NewLeaseDuration>3600</NewLeaseDuration>" +
+      "</u:GetSpecificPortMappingEntryResponse></s:Body></s:Envelope>";
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+    try {
+      (axiosModule as any).post = async () => ({ data: hostile });
+      const mapping = await client.getMapping({ public: 16132 });
+      assert(mapping !== null, "the response parses");
+      assertEqual(mapping!.description, "&flux;", "the declared entity survives unexpanded");
+    } finally {
+      (axiosModule as any).post = realPost;
+      client.close();
+      restore();
+    }
+  });
+
   await test("an error with no response at all propagates untouched", async () => {
     const restore = installFakeRouter("opnsense");
     const realPost = axiosModule.post;

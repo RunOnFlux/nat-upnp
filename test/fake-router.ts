@@ -44,8 +44,10 @@ function fixtureFor(router: string, action: string, body: string): string {
     }
     case "GetGenericPortMappingEntry":
       // Index 0 holds the captured entry. Past it the router reports
-      // end-of-list, which is what terminates the real iteration.
-      return readTag(body, "NewPortMappingIndex") === "0"
+      // end-of-list, which is what terminates the real iteration. With
+      // emptyTable set the router has no mappings at all, so every index
+      // answers the way the capture shows an empty table is answered.
+      return !emptyTable && readTag(body, "NewPortMappingIndex") === "0"
         ? `${router}-soap-GetGenericPortMappingEntry.xml`
         : `${router}-soap-GetGenericPortMappingEntry_Empty.xml`;
     case "GetSpecificPortMappingEntry":
@@ -55,6 +57,12 @@ function fixtureFor(router: string, action: string, body: string): string {
     default:
       return `${router}-soap-${action}.xml`;
   }
+}
+
+/** When set, the router's mapping table is empty from the first index. */
+export let emptyTable = false;
+export function setEmptyTable(on: boolean): void {
+  emptyTable = on;
 }
 
 /** Ways a router can fail that a captured response cannot express. */

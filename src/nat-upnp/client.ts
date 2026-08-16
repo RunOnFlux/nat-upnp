@@ -156,9 +156,10 @@ export class Client implements IClient {
         ]);
       } catch (err) {
         // Routers do not agree on how they signal "no entry at that index".
-        // 713 and 714 are the common answers, but MikroTik replies 402 Invalid
-        // Args, so keying on the pair alone turns the end of a MikroTik walk
-        // into a thrown error and loses the whole listing.
+        // 713 and 714 are the standard answers; MikroTik and the TP-Link/Omada
+        // models say 402 Invalid Args, and an empty table answers that way
+        // from the very first index. Every empty-table capture in the corpus
+        // uses one of these three codes.
         //
         // Past the first index any UPnP fault means the table ran out: entries
         // have already been read, so the router is answering about an index it
@@ -166,7 +167,7 @@ export class Client implements IClient {
         // that way, so a genuinely unsupported action still surfaces rather
         // than being reported as an empty table.
         if (err instanceof UpnpError) {
-          if (i > 0 || err.code === 713 || err.code === 714) break;
+          if (i > 0 || err.code === 713 || err.code === 714 || err.code === 402) break;
         }
         // Transport failures always propagate: a dead socket is not an empty
         // router.

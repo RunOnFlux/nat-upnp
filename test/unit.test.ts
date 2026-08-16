@@ -11,6 +11,7 @@ import { installFakeDgram, FakeSocket, ssdpResponse, settle } from "./fake-dgram
 import {
   installFakeRouter,
   requests,
+  setEmptyTable,
   setV2Overrides,
   setV2Escaped,
   portListing,
@@ -2651,6 +2652,44 @@ function getSoapFaultCode(xml: string): number | null {
     assert(leaseCodes.size >= 2, `expected several lease rejections, got ${[...leaseCodes]}`);
     assert(versions.has(1) && versions.has(2), `expected both IGD versions, got ${[...versions]}`);
   });
+
+  // ========================================
+  // Empty mapping tables, every captured router
+  // ========================================
+  console.log("\n=== Empty mapping tables ===\n");
+
+  // getMappings() on an empty table is [], never a throw — the contract the
+  // rewrite advertises. Routers answer the walk's first index with 713, 714
+  // or, on MikroTik and the TP-Link/Omada models, 402; each capture is driven
+  // through the real client rather than only asserted to be a fault.
+  const emptyTableRouters = readdirSync(fixturesDir)
+    .filter((f) => f.endsWith("-soap-GetGenericPortMappingEntry_Empty.xml"))
+    .map((f) => f.replace("-soap-GetGenericPortMappingEntry_Empty.xml", ""))
+    .sort();
+
+  await test("every captured router contributed an empty-table answer", () => {
+    assertEqual(
+      emptyTableRouters.length,
+      routers.length + surveyedRouters.length,
+      "routers with an _Empty capture"
+    );
+  });
+
+  for (const router of emptyTableRouters) {
+    await test(`${router}: an empty mapping table is [], not an error`, async () => {
+      setEmptyTable(true);
+      const restore = installFakeRouter(router);
+      const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+      try {
+        const mappings = await client.getMappings();
+        assertEqual(mappings.length, 0, "an empty table yields no mappings");
+      } finally {
+        client.close();
+        restore();
+        setEmptyTable(false);
+      }
+    });
+  }
 
   // ========================================
   // Summary

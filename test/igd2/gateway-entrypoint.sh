@@ -17,7 +17,8 @@ FRIENDLY_NAME=${FRIENDLY_NAME:-Flux IGDv$IGD_VERSION Test Gateway}
 # later `network connect` becomes eth1 — the order varies between starts of the
 # same container, and a swapped pair points miniupnpd's uplink at its own LAN.
 iface_for_ip() {
-  ip -4 -o addr show 2>/dev/null | awk -v want="$1" '$4 ~ "^"want"/" { print $2; exit }'
+  # A literal prefix match: in a regex the address's dots are wildcards.
+  ip -4 -o addr show 2>/dev/null | awk -v want="$1" 'index($4, want "/") == 1 { print $2; exit }'
 }
 
 if [ -z "${LAN_IP:-}" ] || [ -z "${WAN_IP:-}" ]; then

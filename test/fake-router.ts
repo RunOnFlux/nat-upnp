@@ -24,7 +24,10 @@ export const DESCRIPTION_URL = "http://192.0.2.1:5000/rootDesc.xml";
 export const UNMAPPED_PORT = 9999;
 
 function isSoapFault(xml: string): boolean {
-  return /<(\w+:)?Fault>/.test(xml);
+  // The prefix must admit hyphens: NEC and TP-Link capture <SOAP-ENV:Fault>,
+  // which \w+ missed — their faults were then delivered as 200 bodies by
+  // accident instead of as the HTTP error the comment below promises.
+  return /<([\w-]+:)?Fault>/.test(xml);
 }
 
 function readTag(body: string, tag: string): string {

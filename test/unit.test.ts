@@ -1997,6 +1997,30 @@ function getSoapFaultCode(xml: string): number | null {
     assert(!(err instanceof UpnpError), "HTML is not a UPnP fault");
   });
 
+  await test("a fault delivered on HTTP 200 still surfaces as the router's error", async () => {
+    // MikroTik answers some refusals with a 200 whose body is the fault. The
+    // fake delivers every captured fault as an HTTP error, so this branch had
+    // no coverage: deleted, a 200-carried fault body would come back to the
+    // caller as a successful response.
+    const restore = installFakeRouter("mikrotik");
+    const fault200 = loadFixture("mikrotik-soap-AddPortMapping_TTL60.xml");
+    const realPost = axiosModule.post;
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+    try {
+      (axiosModule as any).post = async () => ({ data: fault200 });
+      const err = await expectThrow(
+        () => client.createMapping({ public: 8080, private: 8080, ttl: 60 }),
+        "a 200-carried fault"
+      );
+      assert(err instanceof UpnpError, `expected a UpnpError, got ${err}`);
+      assertEqual((err as UpnpError).code, 725, "the capture's fault code is unwrapped");
+    } finally {
+      (axiosModule as any).post = realPost;
+      client.close();
+      restore();
+    }
+  });
+
   await test("an error with no response at all propagates untouched", async () => {
     const restore = installFakeRouter("opnsense");
     const realPost = axiosModule.post;

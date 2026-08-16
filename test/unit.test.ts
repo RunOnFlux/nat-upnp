@@ -693,6 +693,14 @@ function getSoapFaultCode(xml: string): number | null {
     assertEqual(headers["LOCATION"], undefined);
   });
 
+  await test("MIME header parsing: whitespace before the colon stays out of the key", () => {
+    // The value side is trimmed; padding on the name side produced the key
+    // "location " and the response was silently dropped as having no
+    // Location header at all.
+    const headers = parseMimeHeader("HTTP/1.1 200 OK\r\nLOCATION : http://1.2.3.4/\r\n\r\n");
+    assertEqual(headers["location"], "http://1.2.3.4/");
+  });
+
   await test("MIME header parsing: value with colons", () => {
     const headers = parseMimeHeader(
       "HTTP/1.1 200 OK\r\nLocation: http://192.168.1.1:8080/desc.xml\r\n\r\n"

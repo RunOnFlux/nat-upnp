@@ -179,7 +179,9 @@ function emitError(emitter: EventEmitter, err: Error): void {
 export function parseMimeHeader(headerStr: string) {
   const lines = headerStr.split(/\r?\n/);
   return lines.reduce<Record<string, string>>((headers, line) => {
-    const match = line.match(/^([^:]+)\s*:\s*(.*)$/);
+    // Header names are tokens with no whitespace; stopping the name at the
+    // first space keeps "LOCATION : x" from producing the key "location ".
+    const match = line.match(/^([^:\s]+)\s*:\s*(.*)$/);
     if (match) {
       headers[match[1].toLowerCase()] = match[2].trimEnd();
     }

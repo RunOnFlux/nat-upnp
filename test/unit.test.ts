@@ -1352,6 +1352,37 @@ function getSoapFaultCode(xml: string): number | null {
     assert(err instanceof UpnpError && err.code === 501, `expected the 501 to surface, got ${err}`);
   });
 
+  await test("a bare getMappings marks the machine's own mapping local", async () => {
+    // The opnsense capture's entry points at 172.16.32.143; a client that IS
+    // that machine must see its own mapping flagged without asking for the
+    // local filter. FluxOS serves the bare call's result out of /flux/getmap.
+    const restore = installFakeRouter("opnsense");
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: "172.16.32.143" });
+    try {
+      const mappings = await client.getMappings();
+      assertEqual(mappings.length, 1, "the captured entry is listed");
+      assertEqual(mappings[0].local, true, "the machine's own mapping is local");
+    } finally {
+      client.close();
+      restore();
+    }
+  });
+
+  await test("an entry with no internal client is local: null, not a claim", async () => {
+    // "local" is a fact only when both addresses are known. A router that
+    // omits the internal client leaves the question unanswerable, and false
+    // would read as "someone else's mapping" — a claim nothing supports.
+    const blanked = () => ({
+      data: loadFixture("opnsense-soap-GetGenericPortMappingEntry.xml").replace(
+        /<NewInternalClient>[^<]*<\/NewInternalClient>/,
+        "<NewInternalClient></NewInternalClient>"
+      ),
+    });
+    const mappings = await withWalkIndexAnswering(0, blanked, (c) => c.getMappings());
+    assertEqual(mappings.length, 1, "the entry is still listed");
+    assertEqual(mappings[0].local, null, "unknowable, so neither true nor false");
+  });
+
   await test("a shapeless response mid-walk is an error, not the end of the table", async () => {
     // A response with no GetGenericPortMappingEntryResponse in it is not how
     // any router says "no more entries" — that is always a fault.

@@ -143,7 +143,7 @@ export class Client implements IClient {
 
   public async getMappings(options: GetMappingOpts = {}): Promise<Mapping[]> {
     const info = await this.getGateway();
-    const localAddress = options.local ? await info.getLocalAddress() : "";
+    const localAddress = await info.getLocalAddress();
     const results: Mapping[] = [];
 
     // Cap iteration to prevent infinite loops from malicious/broken routers
@@ -176,6 +176,7 @@ export class Client implements IClient {
 
       const mapping = parseMapping(res, localAddress);
 
+      // Only confirmed-local mappings pass the filter: null is not confirmation.
       if (options.local && !mapping.local) continue;
       if (options.description && !matchesDescription(mapping.description, options.description)) continue;
 
@@ -218,7 +219,7 @@ export class Client implements IClient {
       enabled: fieldValue(res.NewEnabled) === "1",
       description: fieldValue(res.NewPortMappingDescription),
       ttl: parseInt(fieldValue(res.NewLeaseDuration), 10) || 0,
-      local: host === localAddress,
+      local: isLocal(host, localAddress),
     };
   }
 
@@ -333,7 +334,7 @@ export class Client implements IClient {
         enabled: fieldValue(entry.NewEnabled) === "1",
         description: fieldValue(entry.NewDescription),
         ttl: parseInt(fieldValue(entry.NewLeaseTime), 10) || 0,
-        local: host === localAddress,
+        local: isLocal(host, localAddress),
       };
     });
   }
@@ -459,6 +460,16 @@ function normalizeOptions(options: StandardOpts) {
   return { remote, internal };
 }
 
+/**
+ * Whether a mapping's internal client is this machine — a fact only when both
+ * addresses are known. An empty value on either side is missing information,
+ * not a match, so the answer is null rather than a guess in either direction.
+ */
+function isLocal(host: string, localAddress: string): boolean | null {
+  if (!host || !localAddress) return null;
+  return host === localAddress;
+}
+
 function parseMapping(res: any, localAddress: string): Mapping {
   const host = fieldValue(res.NewInternalClient);
   return {
@@ -471,7 +482,7 @@ function parseMapping(res: any, localAddress: string): Mapping {
     enabled: fieldValue(res.NewEnabled) === "1",
     description: fieldValue(res.NewPortMappingDescription),
     ttl: parseInt(fieldValue(res.NewLeaseDuration), 10) || 0,
-    local: host === localAddress,
+    local: isLocal(host, localAddress),
   };
 }
 
@@ -502,7 +513,12 @@ export interface Mapping {
   readonly enabled: boolean;
   readonly description: string;
   readonly ttl: number;
-  readonly local: boolean;
+  /**
+   * Whether the mapping points at this machine. true and false are facts;
+   * null means it could not be determined, because this machine's address
+   * did not resolve or the router omitted the entry's internal client.
+   */
+  readonly local: boolean | null;
 }
 
 export interface StatusInfo {

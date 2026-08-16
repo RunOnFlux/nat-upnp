@@ -38,6 +38,16 @@ ensure_network() {
   if ! docker network inspect "$name" >/dev/null 2>&1; then
     docker network create --subnet "$subnet" "$name" >/dev/null
     echo "created network $name ($subnet)"
+    return
+  fi
+  # A pre-existing network is only reusable on the right subnet. Trusting the
+  # name surfaced later as an obscure "does not belong to any of this
+  # network's subnets" from a static-IP attach.
+  local existing
+  existing=$(docker network inspect -f '{{range .IPAM.Config}}{{.Subnet}}{{end}}' "$name")
+  if [ "$existing" != "$subnet" ]; then
+    echo "network $name already exists on $existing, expected $subnet — remove it first" >&2
+    exit 1
   fi
 }
 
@@ -130,7 +140,18 @@ cmd_run() {
 
 cmd_down() {
   docker rm -f "$GW_NAME" >/dev/null 2>&1 || true
-  docker network rm "$LAN_NET" "$WAN_NET" >/dev/null 2>&1 || true
+  local remaining=""
+  local net
+  for net in "$LAN_NET" "$WAN_NET"; do
+    docker network rm "$net" >/dev/null 2>&1 || true
+    if docker network inspect "$net" >/dev/null 2>&1; then
+      remaining="$remaining $net"
+    fi
+  done
+  if [ -n "$remaining" ]; then
+    echo "not torn down:$remaining still present — another container is attached" >&2
+    exit 1
+  fi
   echo "torn down"
 }
 

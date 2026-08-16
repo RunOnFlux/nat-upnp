@@ -1,12 +1,22 @@
 import dgram, { Socket } from "dgram";
 import EventEmitter from "events";
 
+import { resolveLocalAddress } from "./route";
+
 /**
  * SSDP discovery. Finds UPnP devices on the local network via multicast.
- * Uses a single UDP socket bound to 0.0.0.0 — the OS routes the multicast
- * query via the default gateway interface.
+ * One UDP socket, with the search pinned to the interface that carries this
+ * host's internet traffic: a port mapping is only useful on the NAT the
+ * internet reaches us through, and left to itself the kernel routes multicast
+ * by its own table, which an unrelated 224.0.0.0/4 route can point elsewhere.
  */
 export class Ssdp implements ISsdp {
+  /**
+   * Any public unicast address serves here: it is never sent a packet, only
+   * used to ask the kernel which interface carries internet-bound traffic.
+   */
+  private static readonly INTERNET_ROUTE_PROBE = "8.8.8.8";
+
   private readonly sourcePort: number;
   private readonly multicast = "239.255.255.250";
   private readonly port = 1900;
@@ -38,7 +48,16 @@ export class Ssdp implements ISsdp {
       this.parseResponse(message.toString("utf-8"));
     });
 
-    socket.on("listening", () => {
+    socket.on("listening", async () => {
+      try {
+        const address = await resolveLocalAddress(Ssdp.INTERNET_ROUTE_PROBE);
+        socket.setMulticastInterface(address);
+      } catch {
+        // No route to the internet, or the socket died while the route was
+        // being resolved: leave the egress interface to the OS.
+      }
+
+      if (this.closed || this.socket !== socket) return;
       this.bound = true;
 
       while (this.pendingSearches.length > 0) {

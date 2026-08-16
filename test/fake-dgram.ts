@@ -22,6 +22,9 @@ export class FakeSocket extends EventEmitter {
 
   connectedTo: { port: number; address: string } | null = null;
 
+  /** The interface address the last setMulticastInterface call pinned, if any. */
+  multicastInterface: string | null = null;
+
   bind(port?: number): void {
     this.boundTo = port ?? 0;
     if (FakeSocket.failNextBind) {
@@ -52,6 +55,11 @@ export class FakeSocket extends EventEmitter {
 
   address(): { address: string; family: string; port: number } {
     return { address: FakeSocket.localAddress, family: "IPv4", port: 54321 };
+  }
+
+  setMulticastInterface(address: string): void {
+    if (this.closed) throw new Error("Not running");
+    this.multicastInterface = address;
   }
 
   send(buf: Buffer, _off: number, _len: number, port: number, address: string): void {

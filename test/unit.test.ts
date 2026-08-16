@@ -1897,7 +1897,8 @@ function getSoapFaultCode(xml: string): number | null {
       respond();
       const [one, two] = await Promise.all([a, b]);
       assertEqual(one, two, "both callers get the same gateway");
-      assertEqual(sockets.length, 1, "one search served both");
+      const searchesSent = sockets.reduce((n, s) => n + s.sent.length, 0);
+      assertEqual(searchesSent, 1, "one search served both");
     });
   });
 
@@ -2217,7 +2218,7 @@ function getSoapFaultCode(xml: string): number | null {
     await withSsdp(async (ssdp, sockets) => {
       ssdp.search(IGD);
       await settle();
-      assertEqual(sockets.length, 1, "one socket is created");
+      assertEqual(sockets.length, 2, "one search socket and one route probe");
       assertEqual(sockets[0].sent.length, 1, "one datagram is sent");
       const { query, port, address } = sockets[0].sent[0];
       assertEqual(port, 1900, "SSDP port");
@@ -2228,6 +2229,38 @@ function getSoapFaultCode(xml: string): number | null {
       assert(/MX: \d+\r\n/.test(query), "MX header");
       assert(query.includes("HOST: 239.255.255.250:1900\r\n"), "HOST header");
       assert(query.endsWith("\r\n\r\n"), "blank line terminates the request");
+    });
+  });
+
+  await test("the search leaves via the internet-facing interface", async () => {
+    await withSsdp(async (ssdp, sockets) => {
+      // The kernel routes multicast by its own table, which an unrelated
+      // 224.0.0.0/4 route can steer away from the internet path. A mapping is
+      // only useful on the NAT the internet reaches this host through, so the
+      // send must be pinned there deliberately, not left to routing chance.
+      FakeSocket.localAddress = "10.31.7.5";
+      ssdp.search(IGD);
+      await settle();
+      assertEqual(sockets.length, 2, "one search socket and one route probe");
+      const [searchSocket, probe] = sockets;
+      assert(probe.connectedTo !== null, "the probe asks the kernel for the internet route");
+      assertEqual(probe.sent.length, 0, "the probe sends nothing on the wire");
+      assertEqual(
+        searchSocket.multicastInterface,
+        "10.31.7.5",
+        "the search is pinned to the internet route's source address"
+      );
+      assertEqual(searchSocket.sent.length, 1, "the search is sent");
+    });
+  });
+
+  await test("a host with no internet route still searches, on the OS's choice", async () => {
+    await withSsdp(async (ssdp, sockets) => {
+      FakeSocket.failNextConnect = true;
+      ssdp.search(IGD);
+      await settle();
+      assertEqual(sockets[0].multicastInterface, null, "nothing to pin to");
+      assertEqual(sockets[0].sent.length, 1, "the search is still sent");
     });
   });
 
@@ -2325,8 +2358,7 @@ function getSoapFaultCode(xml: string): number | null {
       ssdp.search(IGD);
       ssdp.search("urn:schemas-upnp-org:device:MediaServer:1");
       await settle();
-      assertEqual(fake.sockets.length, 1, "one socket serves both searches");
-      assertEqual(fake.sockets[0].sent.length, 2, "both searches are sent");
+      assertEqual(fake.sockets[0].sent.length, 2, "one socket serves both searches");
       ssdp.close();
       assertEqual(fake.sockets[0].closed, true, "close releases the working socket");
     } finally {
@@ -2374,9 +2406,10 @@ function getSoapFaultCode(xml: string): number | null {
       await settle();
       ssdp.close();
       ssdp.close();
+      const before = fake.sockets.length;
       ssdp.search(IGD);
       await settle();
-      assertEqual(fake.sockets.length, 1, "no socket is created after close");
+      assertEqual(fake.sockets.length, before, "no socket is created after close");
     } finally {
       fake.restore();
     }

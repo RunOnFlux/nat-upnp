@@ -2082,6 +2082,17 @@ function getSoapFaultCode(xml: string): number | null {
     });
   });
 
+  await test("close aborts an in-flight discovery instead of letting it run out", async () => {
+    await withDiscovery({ timeout: 2000 }, async (client, sockets) => {
+      const pending = expectThrow(() => client.getGateway(), "discovery aborted by close");
+      await settle();
+      client.close();
+      const err = await pending;
+      assert(/closed/i.test((err as Error).message), `got: ${(err as Error).message}`);
+      assert(sockets[0].closed, "the search socket is released at close, not at the timeout");
+    });
+  });
+
   await test("a cached gateway is not rediscovered", async () => {
     await withDiscovery({ cacheGateway: true }, async (client, sockets, respond) => {
       const pending = client.getGateway();

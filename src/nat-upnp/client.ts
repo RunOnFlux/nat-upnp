@@ -81,6 +81,7 @@ export class Client implements IClient {
   private readonly cacheGateway: boolean;
   private cachedInfo: UpnpInfo | null = null;
   private pendingGateway: Promise<UpnpInfo> | null = null;
+  private abortDiscovery: (() => void) | null = null;
   private closed = false;
 
   url: string | null;
@@ -419,6 +420,16 @@ export class Client implements IClient {
         }
         reject(err);
       });
+
+      // close() settles the discovery immediately; without this the socket
+      // and the timer both survived the close and ran to the full timeout.
+      this.abortDiscovery = () => {
+        if (resolved) return;
+        resolved = true;
+        p.emit("end");
+        clearTimeout(timeout);
+        reject(new Error("Client is closed"));
+      };
     });
 
     // Clean up SSDP socket after discovery (success or failure) — no leaks.
@@ -429,11 +440,13 @@ export class Client implements IClient {
     return promise.finally(() => {
       ssdp.close();
       this.pendingGateway = null;
+      this.abortDiscovery = null;
     });
   }
 
   public close() {
     this.closed = true;
+    this.abortDiscovery?.();
   }
 
   private async requireCapability(

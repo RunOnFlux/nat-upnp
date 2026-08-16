@@ -1474,6 +1474,36 @@ function getSoapFaultCode(xml: string): number | null {
     assert(res !== undefined, "string ports have always been accepted");
   });
 
+  await test("a string port means the whole string, or it is refused", async () => {
+    // The lenient parse read "0x1F" as 0 — and deleted external port 0, a
+    // port the caller never named — and "8080x" as 8080. A partial parse is
+    // a refusal now: no call substitutes a different port for the one named.
+    for (const garbage of ["0x1F", "8080x", "8080.9"]) {
+      const removed = await expectThrow(
+        () => withRouter("opnsense", (c) => c.removeMapping({ public: garbage as any })),
+        `removeMapping(${JSON.stringify(garbage)})`
+      );
+      assert(/public port/.test((removed as Error).message), `got: ${(removed as Error).message}`);
+      const created = await expectThrow(
+        () =>
+          withRouter("opnsense", (c) =>
+            c.createMapping({ public: garbage as any, private: garbage as any })
+          ),
+        `createMapping(${JSON.stringify(garbage)})`
+      );
+      assert(/port/.test((created as Error).message), `got: ${(created as Error).message}`);
+    }
+  });
+
+  await test("the numeric-string convenience works on every entry point", async () => {
+    const fetched = await withRouter("opnsense", (c) => c.getMapping({ public: "16132" as any }));
+    assert(fetched !== null, "getMapping accepts a numeric string");
+    const objectForm = await withRouter("opnsense", (c) =>
+      c.createMapping({ public: { port: "8080" } as any, private: { port: "8080" } as any })
+    );
+    assert(objectForm !== undefined, "the object form accepts a numeric string too");
+  });
+
   await test("a description with an entity round-trips, and its filter matches", async () => {
     // Outbound descriptions are XML-escaped and the SOAP parser leaves
     // entities alone for XXE protection, so without decoding on read a

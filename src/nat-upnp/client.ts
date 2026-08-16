@@ -508,12 +508,16 @@ export class Client implements IClient {
  * and what the table can hold, a caller must be able to name.
  */
 function validPort(value: unknown, what: string, lowest: 0 | 1 = 1): number {
-  if (typeof value !== "number" || !Number.isInteger(value) || value < lowest || value > 65535) {
+  // A string counts only when the whole string is a decimal number. The
+  // lenient parse read "0x1F" as 0 and "8080x" as 8080 — and then acted on a
+  // port the caller never named.
+  const port = typeof value === "string" && /^\d+$/.test(value) ? Number(value) : value;
+  if (typeof port !== "number" || !Number.isInteger(port) || port < lowest || port > 65535) {
     throw new Error(
       `${what} must be an integer between ${lowest} and 65535, got ${JSON.stringify(value)}`
     );
   }
-  return value;
+  return port;
 }
 
 function validProtocol(value: string | undefined): string {
@@ -525,12 +529,10 @@ function validProtocol(value: string | undefined): string {
 }
 
 function normalizeOptions(options: StandardOpts, lowestPort: 0 | 1 = 1) {
-  function toObject(addr: StandardOpts["public"]): { port?: number; host?: string } {
-    if (typeof addr === "number") return { port: addr };
-    if (typeof addr === "string") {
-      const n = parseInt(addr, 10);
-      return isFinite(n) ? { port: n } : {};
-    }
+  // Ports pass through untouched — validPort is the single place a string
+  // becomes a number, so no path can reacquire a lenient parse.
+  function toObject(addr: StandardOpts["public"]): { port?: number | string; host?: string } {
+    if (typeof addr === "number" || typeof addr === "string") return { port: addr };
     if (typeof addr === "object" && addr !== null) return addr;
     return {};
   }
@@ -542,10 +544,10 @@ function normalizeOptions(options: StandardOpts, lowestPort: 0 | 1 = 1) {
     internal.port = remote.port;
   }
 
-  remote.port = validPort(remote.port, "public port", lowestPort);
-  internal.port = validPort(internal.port, "private port", lowestPort);
-
-  return { remote, internal };
+  return {
+    remote: { host: remote.host, port: validPort(remote.port, "public port", lowestPort) },
+    internal: { host: internal.host, port: validPort(internal.port, "private port", lowestPort) },
+  };
 }
 
 /**

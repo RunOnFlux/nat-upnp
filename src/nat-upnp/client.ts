@@ -157,25 +157,22 @@ export class Client implements IClient {
       } catch (err) {
         // Routers do not agree on how they signal "no entry at that index".
         // 713 and 714 are the standard answers; MikroTik and the TP-Link/Omada
-        // models say 402 Invalid Args, and an empty table answers that way
-        // from the very first index. Every empty-table capture in the corpus
-        // uses one of these three codes.
+        // models say 402 Invalid Args. Every end-of-table capture in the
+        // corpus — empty table and end of walk alike — is one of these three.
         //
-        // Past the first index any UPnP fault means the table ran out: entries
-        // have already been read, so the router is answering about an index it
-        // does not have. At the first index only the absence codes are treated
-        // that way, so a genuinely unsupported action still surfaces rather
-        // than being reported as an empty table.
-        if (err instanceof UpnpError) {
-          if (i > 0 || err.code === 713 || err.code === 714 || err.code === 402) break;
+        // Anything else is the router failing, not the table ending, and a
+        // partial listing must never pass for a complete one: a caller
+        // checking whether its own mapping survived would conclude it is gone
+        // and re-create it. Transport failures propagate the same way — a
+        // dead socket is not an empty router.
+        if (err instanceof UpnpError && (err.code === 713 || err.code === 714 || err.code === 402)) {
+          break;
         }
-        // Transport failures always propagate: a dead socket is not an empty
-        // router.
         throw err;
       }
 
       const res = findResponseKey(data, "GetGenericPortMappingEntryResponse");
-      if (!res) break;
+      if (!res) throw new Error("Incorrect response for GetGenericPortMappingEntry");
 
       const mapping = parseMapping(res, localAddress);
 

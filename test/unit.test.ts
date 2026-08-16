@@ -1304,6 +1304,72 @@ function getSoapFaultCode(xml: string): number | null {
     assert(err !== undefined, "expected the failure to propagate");
   });
 
+  /** Serve opnsense normally, except the walk's given index answers as told. */
+  async function withWalkIndexAnswering<T>(
+    index: number,
+    answer: () => { data: string },
+    fn: (c: Client) => Promise<T>
+  ): Promise<T> {
+    const restore = installFakeRouter("opnsense");
+    const fakePost = axiosModule.post;
+    (axiosModule as any).post = async (url: string, body: string, config: any) => {
+      const walkIndex = /<NewPortMappingIndex>(\d+)<\/NewPortMappingIndex>/.exec(body)?.[1];
+      if (walkIndex === String(index)) return answer();
+      return fakePost(url, body, config);
+    };
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+    try {
+      return await fn(client);
+    } finally {
+      client.close();
+      (axiosModule as any).post = fakePost;
+      restore();
+    }
+  }
+
+  await test("a fault mid-walk is an error, not the end of the table", async () => {
+    // Only 713/714/402 mean "no entry at that index" — the corpus shows no
+    // other end-of-table dialect. A transient 501 from a busy router must not
+    // pass a partial listing off as a complete one: a caller checking whether
+    // its own mapping survived would conclude it is gone and re-create it.
+    const fault501 = () => {
+      throw {
+        response: {
+          data:
+            '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>' +
+            "<s:Fault><faultcode>s:Client</faultcode><faultstring>UPnPError</faultstring>" +
+            '<detail><UPnPError xmlns="urn:schemas-upnp-org:control-1-0">' +
+            "<errorCode>501</errorCode><errorDescription>Action Failed</errorDescription>" +
+            "</UPnPError></detail></s:Fault></s:Body></s:Envelope>",
+          status: 500,
+        },
+      };
+    };
+    const err = await expectThrow(
+      () => withWalkIndexAnswering(1, fault501, (c) => c.getMappings()),
+      "getMappings with a 501 mid-walk"
+    );
+    assert(err instanceof UpnpError && err.code === 501, `expected the 501 to surface, got ${err}`);
+  });
+
+  await test("a shapeless response mid-walk is an error, not the end of the table", async () => {
+    // A response with no GetGenericPortMappingEntryResponse in it is not how
+    // any router says "no more entries" — that is always a fault.
+    const alien = () => ({
+      data:
+        '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>' +
+        "<u:SomethingElseEntirely/></s:Body></s:Envelope>",
+    });
+    const err = await expectThrow(
+      () => withWalkIndexAnswering(1, alien, (c) => c.getMappings()),
+      "getMappings with a shapeless response mid-walk"
+    );
+    assert(
+      /GetGenericPortMappingEntry/.test((err as Error).message),
+      `error should name the action, got: ${(err as Error).message}`
+    );
+  });
+
   await test("Client surfaces a transport failure rather than swallowing it", async () => {
     const restore = installFakeRouter("opnsense");
     const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });

@@ -2673,8 +2673,11 @@ function getSoapFaultCode(xml: string): number | null {
     await withSsdp(async (ssdp, sockets) => {
       const emitter = ssdp.search(IGD);
       await settle();
+      // Listener first: delivery emits synchronously, so listening afterwards
+      // reports null even for a response the code accepted.
+      const pending = once(emitter, "device");
       sockets[0].deliver(ssdpResponse("urn:schemas-upnp-org:device:MediaServer:1"));
-      assertEqual(await once(emitter, "device"), null, "should not match another target");
+      assertEqual(await pending, null, "should not match another target");
     });
   });
 
@@ -2682,8 +2685,9 @@ function getSoapFaultCode(xml: string): number | null {
     await withSsdp(async (ssdp, sockets) => {
       const emitter = ssdp.search(IGD);
       await settle();
+      const pending = once(emitter, "device");
       sockets[0].deliver(`HTTP/1.1 200 OK\r\nST: ${IGD}\r\n\r\n`);
-      assertEqual(await once(emitter, "device"), null, "no location means no device");
+      assertEqual(await pending, null, "no location means no device");
     });
   });
 
@@ -2693,8 +2697,9 @@ function getSoapFaultCode(xml: string): number | null {
       await settle();
       // Guards against a hostile responder pointing the client at a file or a
       // scheme the fetch would treat very differently.
+      const pending = once(emitter, "device");
       sockets[0].deliver(ssdpResponse(IGD, "file:///etc/passwd"));
-      assertEqual(await once(emitter, "device"), null, "non-http location is refused");
+      assertEqual(await pending, null, "non-http location is refused");
     });
   });
 
@@ -2702,8 +2707,11 @@ function getSoapFaultCode(xml: string): number | null {
     await withSsdp(async (ssdp, sockets) => {
       const emitter = ssdp.search(IGD);
       await settle();
-      sockets[0].deliver("GARBAGE\r\nST: whatever\r\nLOCATION: http://192.0.2.1/\r\n\r\n");
-      assertEqual(await once(emitter, "device"), null, "only HTTP/NOTIFY is parsed");
+      const pending = once(emitter, "device");
+      // Matching ST and a valid Location, so the request line is the only
+      // thing standing between this garbage and a device event.
+      sockets[0].deliver(`GARBAGE\r\nST: ${IGD}\r\nLOCATION: http://192.0.2.1/\r\n\r\n`);
+      assertEqual(await pending, null, "only HTTP/NOTIFY is parsed");
     });
   });
 
@@ -2796,8 +2804,9 @@ function getSoapFaultCode(xml: string): number | null {
       const socket = fake.sockets[0];
       ssdp.close();
       assertEqual(socket.closed, true, "socket is closed");
+      const pending = once(emitter, "device");
       socket.deliver(ssdpResponse(IGD));
-      assertEqual(await once(emitter, "device"), null, "no delivery after close");
+      assertEqual(await pending, null, "no delivery after close");
     } finally {
       fake.restore();
     }

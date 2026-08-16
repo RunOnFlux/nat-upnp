@@ -104,7 +104,7 @@ export class Client implements IClient {
     const args = (lease: number | string): (string | number)[][] => [
       ["NewRemoteHost", ports.remote.host ?? ""],
       ["NewExternalPort", String(ports.remote.port)],
-      ["NewProtocol", (options.protocol || "TCP").toUpperCase()],
+      ["NewProtocol", validProtocol(options.protocol)],
       ["NewInternalPort", String(ports.internal.port)],
       ["NewInternalClient", ports.internal.host || localAddress],
       ["NewEnabled", 1],
@@ -132,12 +132,12 @@ export class Client implements IClient {
 
   public async removeMapping(options: DeletePortMappingOpts): Promise<RawResponse> {
     const info = await this.getGateway();
-    const ports = normalizeOptions(options);
+    const ports = normalizeOptions(options, 0);
 
     return info.gateway.run("DeletePortMapping", [
       ["NewRemoteHost", ports.remote.host ?? ""],
       ["NewExternalPort", String(ports.remote.port)],
-      ["NewProtocol", (options.protocol || "TCP").toUpperCase()],
+      ["NewProtocol", validProtocol(options.protocol)],
     ]);
   }
 
@@ -194,13 +194,14 @@ export class Client implements IClient {
   public async getMapping(options: GetSpecificMappingOpts): Promise<Mapping | null> {
     const info = await this.getGateway();
     const localAddress = await info.getLocalAddress();
-    const protocol = (options.protocol || "TCP").toUpperCase();
+    const protocol = validProtocol(options.protocol);
+    const externalPort = validPort(options.public, "public port", 0);
 
     let data: RawResponse;
     try {
       data = await info.gateway.run("GetSpecificPortMappingEntry", [
         ["NewRemoteHost", options.remoteHost ?? ""],
-        ["NewExternalPort", String(options.public)],
+        ["NewExternalPort", String(externalPort)],
         ["NewProtocol", protocol],
       ]);
     } catch (err) {
@@ -213,7 +214,7 @@ export class Client implements IClient {
 
     const host = fieldValue(res.NewInternalClient);
     return {
-      public: { host: options.remoteHost ?? "", port: Number(options.public) },
+      public: { host: options.remoteHost ?? "", port: externalPort },
       private: { host, port: parseInt(fieldValue(res.NewInternalPort), 10) || 0 },
       protocol: protocol.toLowerCase(),
       enabled: fieldValue(res.NewEnabled) === "1",
@@ -261,7 +262,7 @@ export class Client implements IClient {
     const data = await info.gateway.run("AddAnyPortMapping", [
       ["NewRemoteHost", ports.remote.host ?? ""],
       ["NewExternalPort", String(ports.remote.port)],
-      ["NewProtocol", (options.protocol || "TCP").toUpperCase()],
+      ["NewProtocol", validProtocol(options.protocol)],
       ["NewInternalPort", String(ports.internal.port)],
       ["NewInternalClient", ports.internal.host || localAddress],
       ["NewEnabled", 1],
@@ -280,9 +281,9 @@ export class Client implements IClient {
     await this.requireCapability(info, "supportsDeletePortMappingRange", "DeletePortMappingRange");
 
     return info.gateway.run("DeletePortMappingRange", [
-      ["NewStartPort", String(options.startPort)],
-      ["NewEndPort", String(options.endPort)],
-      ["NewProtocol", (options.protocol || "TCP").toUpperCase()],
+      ["NewStartPort", String(validPort(options.startPort, "startPort", 0))],
+      ["NewEndPort", String(validPort(options.endPort, "endPort", 0))],
+      ["NewProtocol", validProtocol(options.protocol)],
       ["NewManage", options.manage ? "1" : "0"],
     ]);
   }
@@ -292,11 +293,11 @@ export class Client implements IClient {
     await this.requireCapability(info, "supportsGetListOfPortMappings", "GetListOfPortMappings");
 
     const localAddress = await info.getLocalAddress();
-    const protocol = (options.protocol || "TCP").toUpperCase();
+    const protocol = validProtocol(options.protocol);
 
     const data = await info.gateway.run("GetListOfPortMappings", [
-      ["NewStartPort", String(options.startPort)],
-      ["NewEndPort", String(options.endPort)],
+      ["NewStartPort", String(validPort(options.startPort, "startPort", 0))],
+      ["NewEndPort", String(validPort(options.endPort, "endPort", 0))],
       ["NewProtocol", protocol],
       ["NewManage", options.manage ? "1" : "0"],
       ["NewNumberOfPorts", String(options.numberOfPorts ?? 1000)],
@@ -439,7 +440,36 @@ export class Client implements IClient {
  * =======================
  */
 
-function normalizeOptions(options: StandardOpts) {
+/**
+ * A port must be a 16-bit integer before it goes anywhere near the wire. The
+ * router cannot be trusted to refuse anything else — miniupnpd truncates an
+ * oversized value to 16 bits, maps the wrong port and answers success — and
+ * GetSpecificPortMappingEntry returns neither port nor protocol, so a bad
+ * value can never be caught by reading the mapping back.
+ *
+ * Creating a mapping requires 1-65535: nothing can listen on port 0, and some
+ * routers treat an external 0 as a wildcard. References to existing entries
+ * allow 0 — the surveyed MikroTik holds a placeholder rule at external port 0,
+ * and what the table can hold, a caller must be able to name.
+ */
+function validPort(value: unknown, what: string, lowest: 0 | 1 = 1): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < lowest || value > 65535) {
+    throw new Error(
+      `${what} must be an integer between ${lowest} and 65535, got ${JSON.stringify(value)}`
+    );
+  }
+  return value;
+}
+
+function validProtocol(value: string | undefined): string {
+  const protocol = (value ?? "TCP").toUpperCase();
+  if (protocol !== "TCP" && protocol !== "UDP") {
+    throw new Error(`protocol must be TCP or UDP, got ${JSON.stringify(value)}`);
+  }
+  return protocol;
+}
+
+function normalizeOptions(options: StandardOpts, lowestPort: 0 | 1 = 1) {
   function toObject(addr: StandardOpts["public"]): { port?: number; host?: string } {
     if (typeof addr === "number") return { port: addr };
     if (typeof addr === "string") {
@@ -456,6 +486,9 @@ function normalizeOptions(options: StandardOpts) {
   if (internal.port === undefined && remote.port !== undefined) {
     internal.port = remote.port;
   }
+
+  remote.port = validPort(remote.port, "public port", lowestPort);
+  internal.port = validPort(internal.port, "private port", lowestPort);
 
   return { remote, internal };
 }

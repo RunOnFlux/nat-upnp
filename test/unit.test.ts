@@ -1383,6 +1383,89 @@ function getSoapFaultCode(xml: string): number | null {
     assertEqual(mappings[0].local, null, "unknowable, so neither true nor false");
   });
 
+  // ========================================
+  // Input validation at the client's door
+  // ========================================
+  // GetSpecificPortMappingEntry returns neither port nor protocol, so nothing
+  // about a mapping can be read back and verified after the fact — the router
+  // even truncates an oversized port to 16 bits and reports success. The only
+  // place a bad value can be caught is on the way in.
+
+  await test("a missing public port is an error, not the string 'undefined'", async () => {
+    const err = await expectThrow(
+      () => withRouter("opnsense", (c) => c.createMapping({})),
+      "createMapping with no ports"
+    );
+    assert(/public port/.test((err as Error).message), `got: ${(err as Error).message}`);
+    assert(!(err instanceof UpnpError), "input validation is not a router fault");
+  });
+
+  await test("a port beyond 65535 is refused, not silently truncated by the router", async () => {
+    // miniupnpd maps 99999 as 34463 (99999 & 0xFFFF) and answers success, so
+    // resolving here would confirm a mapping on a port that does not exist.
+    const err = await expectThrow(
+      () => withRouter("opnsense", (c) => c.createMapping({ public: 99999, private: 99999 })),
+      "createMapping beyond the port range"
+    );
+    assert(/99999/.test((err as Error).message), `got: ${(err as Error).message}`);
+  });
+
+  await test("a protocol that is not TCP or UDP is refused", async () => {
+    const err = await expectThrow(
+      () => withRouter("opnsense", (c) => c.createMapping({ public: 8080, protocol: "icmp" })),
+      "createMapping with a non-port protocol"
+    );
+    assert(/protocol/.test((err as Error).message), `got: ${(err as Error).message}`);
+  });
+
+  await test("getMapping refuses a port beyond 65535", async () => {
+    const err = await expectThrow(
+      () => withRouter("opnsense", (c) => c.getMapping({ public: 65536 })),
+      "getMapping beyond the port range"
+    );
+    assert(/public port/.test((err as Error).message), `got: ${(err as Error).message}`);
+  });
+
+  await test("port 0 names an existing entry, so references accept it", async () => {
+    // The surveyed MikroTik holds a placeholder rule at external port 0; what
+    // the table can hold, a caller must be able to look up and delete. Only
+    // creating a mapping requires 1-65535.
+    const looked = await withRouter("mikrotik-router-os", (c) => c.getMapping({ public: 0 }));
+    assert(looked !== null, "the port-0 entry can be queried");
+    const removed = await withRouter("opnsense", (c) => c.removeMapping({ public: 0 }));
+    assert(removed !== undefined, "a port-0 entry can be deleted");
+    const err = await expectThrow(
+      () => withRouter("opnsense", (c) => c.createMapping({ public: 0 })),
+      "createMapping for port 0"
+    );
+    assert(/public port/.test((err as Error).message), `got: ${(err as Error).message}`);
+  });
+
+  await test("getMappingRange refuses an end port beyond the range", async () => {
+    const err = await expectThrow(
+      () =>
+        withRouter("ubiquiti-udm-pro-max", (c) =>
+          c.getMappingRange({ startPort: 1, endPort: 99999 })
+        ),
+      "getMappingRange beyond the port range"
+    );
+    assert(/endPort/.test((err as Error).message), `got: ${(err as Error).message}`);
+  });
+
+  await test("the port range boundaries themselves are accepted", async () => {
+    const res = await withRouter("opnsense", (c) => c.removeMapping({ public: 65535 }));
+    assert(res !== undefined, "65535 is a valid port");
+    const res1 = await withRouter("opnsense", (c) => c.removeMapping({ public: 1 }));
+    assert(res1 !== undefined, "1 is a valid port");
+  });
+
+  await test("a numeric string port keeps working", async () => {
+    const res = await withRouter("opnsense", (c) =>
+      c.createMapping({ public: "8080" as any, private: "8080" as any })
+    );
+    assert(res !== undefined, "string ports have always been accepted");
+  });
+
   await test("a shapeless response mid-walk is an error, not the end of the table", async () => {
     // A response with no GetGenericPortMappingEntryResponse in it is not how
     // any router says "no more entries" — that is always a fault.

@@ -1681,6 +1681,17 @@ function getSoapFaultCode(xml: string): number | null {
     assertEqual(decodeXmlEntities("&amp;lt;"), "&lt;", "single pass only");
   });
 
+  await test("numeric character references decode like the named five", () => {
+    // &#39; was the one numeric form handled; a router encoding & as &#38;
+    // — or any other decimal or hex reference — read back still-encoded.
+    assertEqual(decodeXmlEntities("Flux&#38;Co"), "Flux&Co", "decimal");
+    assertEqual(decodeXmlEntities("Flux&#x26;Co"), "Flux&Co", "hex");
+    assertEqual(decodeXmlEntities("a&#60;b&#62;c"), "a<b>c", "angle brackets");
+    assertEqual(decodeXmlEntities("&#x1F513; open"), "\u{1F513} open", "astral plane");
+    assertEqual(decodeXmlEntities("&amp;#38;"), "&#38;", "single pass only");
+    assertEqual(decodeXmlEntities("&#1114112;"), "&#1114112;", "out of range stays as written");
+  });
+
   // ========================================
   // IGD v2 actions
   // ========================================

@@ -16,29 +16,31 @@ export const xmlParser = new XMLParser({
 });
 
 /**
- * Decode the five entities XML predefines.
+ * Decode the five entities XML predefines, and numeric character references.
  *
  * The parser runs with processEntities disabled so a hostile description cannot
  * declare entities of its own — that is the XXE defence and it stays. But the
  * switch is all-or-nothing, so ordinary escaped text came back raw and a router
  * named "OPNsense UPnP IGD &amp; PCP" read back with the escape still in it.
- * These five expand to plain characters and reference nothing, so decoding them
- * afterwards restores the text without reopening anything.
+ * The named five expand to plain characters and a numeric reference names its
+ * character directly — neither references anything declared, so decoding them
+ * afterwards restores the text without reopening anything. Single pass: what a
+ * decode produces is never re-decoded.
  */
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+};
+
 export function decodeXmlEntities(value: string): string {
-  return value.replace(/&(amp|lt|gt|quot|apos|#39);/g, (_match, name) => {
-    switch (name) {
-      case "amp":
-        return "&";
-      case "lt":
-        return "<";
-      case "gt":
-        return ">";
-      case "quot":
-        return '"';
-      default:
-        return "'";
-    }
+  return value.replace(/&(amp|lt|gt|quot|apos|#[0-9]+|#x[0-9a-fA-F]+);/g, (match, name: string) => {
+    const literal = NAMED_ENTITIES[name];
+    if (literal) return literal;
+    const code = name.startsWith("#x") ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10);
+    return code <= 0x10ffff ? String.fromCodePoint(code) : match;
   });
 }
 

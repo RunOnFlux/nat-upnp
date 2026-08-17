@@ -2,7 +2,13 @@ import { readFileSync, existsSync, readdirSync } from "fs";
 import { join } from "path";
 import { XMLParser } from "fast-xml-parser";
 import axiosModule, { type AxiosRequestConfig } from "axios";
-import { UpnpError, UPNP_ERROR_CODES, decodeXmlEntities } from "../src/nat-upnp/device";
+import {
+  UpnpError,
+  CapabilityUnavailableError,
+  UnsupportedActionError,
+  UPNP_ERROR_CODES,
+  decodeXmlEntities,
+} from "../src/nat-upnp/device";
 import { Device } from "../src/nat-upnp/device";
 import { Client } from "../src/nat-upnp/client";
 import { parseMimeHeader, Ssdp, type SsdpEmitter } from "../src/nat-upnp/ssdp";
@@ -1699,6 +1705,55 @@ function getSoapFaultCode(xml: string): number | null {
       }
     });
   }
+
+  await test("capability-unknown and not-supported are distinguishable errors", async () => {
+    // Both wore UpnpError 401 — the code a router itself sends for Invalid
+    // Action — so a caller matching on err.code, as the API documents, could
+    // not separate retry-later from never. Neither is a router answer, so
+    // neither wears a router's code.
+    {
+      const restore = installFakeRouter("sercomm-gpon");
+      const fakeGet = axiosModule.get;
+      (axiosModule as any).get = async (url: string) => {
+        if (url !== DESCRIPTION_URL) throw new Error("socket hang up");
+        return fakeGet(url);
+      };
+      const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+      try {
+        const transient = await expectThrow(
+          () => client.removeMappingRange({ startPort: 16137, endPort: 16137 }),
+          "v2 action while the SCPD is unfetchable"
+        );
+        assert(
+          transient instanceof CapabilityUnavailableError,
+          `transient: expected CapabilityUnavailableError, got ${transient}`
+        );
+        assert(!(transient instanceof UpnpError), "transient: no router sent a code");
+      } finally {
+        (axiosModule as any).get = fakeGet;
+        client.close();
+        restore();
+      }
+    }
+    {
+      const restore = installFakeRouter("asus-rt-ax55");
+      const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+      try {
+        const permanent = await expectThrow(
+          () => client.removeMappingRange({ startPort: 16137, endPort: 16137 }),
+          "v2 action on a router that does not advertise it"
+        );
+        assert(
+          permanent instanceof UnsupportedActionError,
+          `permanent: expected UnsupportedActionError, got ${permanent}`
+        );
+        assert(!(permanent instanceof UpnpError), "permanent: no router sent a code");
+      } finally {
+        client.close();
+        restore();
+      }
+    }
+  });
 
   await test("createAnyMapping sends the documented arguments", async () => {
     await withRouter("nokia-igd-v2", (c) =>

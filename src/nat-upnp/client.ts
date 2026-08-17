@@ -3,6 +3,8 @@ import Device, {
   GatewayDevice,
   ServiceCapabilities,
   UpnpError,
+  CapabilityUnavailableError,
+  UnsupportedActionError,
   decodeXmlEntities,
   fieldValue,
   xmlParser,
@@ -480,10 +482,10 @@ export class Client implements IClient {
   ): Promise<void> {
     const capabilities = await info.getCapabilities();
     if (!capabilities) {
-      throw new UpnpError(401, `Cannot verify ${action} support (SCPD unavailable)`, action);
+      throw new CapabilityUnavailableError(action);
     }
     if (!capabilities[capability]) {
-      throw new UpnpError(401, `${action} not supported by this device`, action);
+      throw new UnsupportedActionError(action);
     }
   }
 }

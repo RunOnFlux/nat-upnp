@@ -1,6 +1,8 @@
 export {
   Device,
   UpnpError,
+  CapabilityUnavailableError,
+  UnsupportedActionError,
   UPNP_ERROR_CODES,
   ONLY_PERMANENT_LEASES,
   xmlParser,

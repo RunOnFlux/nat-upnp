@@ -43,6 +43,33 @@ export function decodeXmlEntities(value: string): string {
 }
 
 /**
+ * The SCPD could not be fetched, so support for the action is unknown.
+ * Transient: the capability cache clears on failure and the next call asks
+ * the router again. Not an UpnpError — no router sent a code.
+ */
+export class CapabilityUnavailableError extends Error {
+  readonly action: string;
+  constructor(action: string) {
+    super(`Cannot verify ${action} support (SCPD unavailable)`);
+    this.name = "CapabilityUnavailableError";
+    this.action = action;
+  }
+}
+
+/**
+ * The router's own SCPD does not advertise the action. Permanent for this
+ * device. Not an UpnpError — no router sent a code.
+ */
+export class UnsupportedActionError extends Error {
+  readonly action: string;
+  constructor(action: string) {
+    super(`${action} not supported by this device`);
+    this.name = "UnsupportedActionError";
+    this.action = action;
+  }
+}
+
+/**
  * Read a value out of a parsed response.
  *
  * A router may attach attributes to a value element — the YAMAHA RTX810 tags

@@ -2365,6 +2365,43 @@ function getSoapFaultCode(xml: string): number | null {
     }
   });
 
+  await test("the transport caps ride every wire call", async () => {
+    // The 2 MB response cap, the timeout and the redirect bound are the
+    // guards against a malicious or broken router — and they live in the
+    // axios config, which the fakes replace, so deleting one shipped
+    // invisibly.
+    const restore = installFakeRouter("opnsense");
+    const realGet = axiosModule.get;
+    const realPost = axiosModule.post;
+    const seen: (AxiosRequestConfig<string> | undefined)[] = [];
+    (axiosModule as any).get = async (url: string, config?: AxiosRequestConfig<string>) => {
+      seen.push(config);
+      return realGet(url);
+    };
+    (axiosModule as any).post = async (url: string, body: string, config?: AxiosRequestConfig<string>) => {
+      seen.push(config);
+      return realPost(url, body, config);
+    };
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+    try {
+      await client.getMappings();
+      assert(seen.length >= 2, "the description fetch and the SOAP calls were captured");
+      for (const config of seen) {
+        assert(config !== undefined, "every wire call carries a config");
+        assertEqual(config!.maxContentLength, 2 * 1024 * 1024, "response size cap");
+        assertEqual(config!.maxBodyLength, 2 * 1024 * 1024, "body size cap");
+        assertEqual(config!.timeout, 10000, "timeout");
+        assertEqual(config!.maxRedirects, 2, "redirect cap");
+        assert(config!.httpAgent !== undefined, "keep-alive agent");
+      }
+    } finally {
+      (axiosModule as any).get = realGet;
+      (axiosModule as any).post = realPost;
+      client.close();
+      restore();
+    }
+  });
+
   await test("attributed device-info fields read their text, not [object Object]", async () => {
     // The YAMAHA RTX810 hangs Microsoft datatype attributes off its values,
     // which makes the parser hand back an object; String() on that is

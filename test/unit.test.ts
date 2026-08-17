@@ -2028,6 +2028,14 @@ function getSoapFaultCode(xml: string): number | null {
         `no entry for ${code}`
       );
     }
+    // The codes the v2 actions themselves define (WANIPConnection:2 table
+    // 2-51) — 728 is precisely createAnyMapping's signature failure.
+    for (const code of [728, 729, 730, 731, 732, 733]) {
+      assert(
+        typeof UPNP_ERROR_CODES[code] === "string" && UPNP_ERROR_CODES[code].length > 0,
+        `no entry for ${code}`
+      );
+    }
   });
 
   await test("the table is the spec meaning, not the router's wording", () => {

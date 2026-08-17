@@ -543,6 +543,12 @@ export const UPNP_ERROR_CODES: Readonly<Record<number, string>> = Object.freeze(
   725: "Only Permanent Leases Supported",
   726: "Remote Host Only Supports Wildcard",
   727: "External Port Only Supports Wildcard",
+  728: "No Port Maps Available",
+  729: "Conflict With Other Mechanisms",
+  730: "Port Mapping Not Found",
+  731: "Read Only",
+  732: "Wildcard Not Permitted In Internal Port",
+  733: "Inconsistent Parameters",
 });
 
 /** The router accepts permanent mappings only, so a timed lease is refused. */

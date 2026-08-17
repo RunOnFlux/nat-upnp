@@ -3598,6 +3598,50 @@ function getSoapFaultCode(xml: string): number | null {
     }
   });
 
+  await test("an inline NewPortListing is a document, not an empty table", async () => {
+    // The corpus wraps the listing in CDATA or entity-escapes it — both
+    // arrive as a string. A router inlining it as actual markup hands the
+    // parser the document directly; reading that as "" made a populated
+    // table report empty — the partial-for-complete lie the walk forbids —
+    // and any other unreadable shape must be an error, never an empty table.
+    const restore = installFakeRouter("sercomm-gpon");
+    const realPost = axiosModule.post;
+    const respond = (inner: string) => async (url: string, body: string, config: any) => {
+      const soapAction = String(JSON.parse(config.headers.SOAPAction));
+      if (!soapAction.includes("GetListOfPortMappings")) return realPost(url, body, config);
+      return {
+        data:
+          '<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>' +
+          '<u:GetListOfPortMappingsResponse xmlns:u="urn:schemas-upnp-org:service:WANIPConnection:2">' +
+          `<NewPortListing>${inner}</NewPortListing>` +
+          "</u:GetListOfPortMappingsResponse></s:Body></s:Envelope>",
+      };
+    };
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+    try {
+      (axiosModule as any).post = respond(
+        portListing([
+          { external: 16137, internal: 9090, host: "192.168.1.61", description: "Flux_Inline", ttl: 60 },
+        ])
+      );
+      const mappings = await client.getMappingRange({ startPort: 1, endPort: 65535 });
+      assertEqual(mappings.length, 1, "the inline listing is read");
+      assertEqual(mappings[0].private.port, 9090, "the inline entry's internal port");
+      assertEqual(mappings[0].description, "Flux_Inline", "the inline entry's description");
+
+      (axiosModule as any).post = respond("<SomethingUnrecognized>x</SomethingUnrecognized>");
+      const err = await expectThrow(
+        () => client.getMappingRange({ startPort: 1, endPort: 65535 }),
+        "an unreadable listing shape"
+      );
+      assert(/NewPortListing/.test((err as Error).message), `got: ${(err as Error).message}`);
+    } finally {
+      (axiosModule as any).post = realPost;
+      client.close();
+      restore();
+    }
+  });
+
   await test("getMappingRange reads NewProtocol from the listing, not from the request", async () => {
     // Every captured listing in the corpus is TCP-only, so asking for UDP is
     // what separates a value read out of the router's answer from one copied

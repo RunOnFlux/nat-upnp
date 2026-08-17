@@ -338,20 +338,37 @@ export class Client implements IClient {
     const res = findResponseKey(data, "GetListOfPortMappingsResponse");
     if (!res) throw new Error("Incorrect response for GetListOfPortMappings");
 
-    const portListing = fieldValue(res.NewPortListing);
-    if (!portListing) return [];
-
     // NewPortListing embeds an XML document in a string, and routers wrap it
     // two ways: CDATA (Ubiquiti, OpenWRT, Debian) delivers the document
     // as-is, while the escaped dialect delivers it with every '<' entity-
     // escaped. Only the escaped form gets the wrapper decode — decoding a
     // real document turns escaped text in its fields into live markup and
     // truncates the parse at the first '<' in anyone's description. A raw
-    // '<' in the payload means it is already a document.
-    const document = portListing.includes("<")
-      ? portListing
-      : decodeXmlEntities(portListing);
-    const parsed = xmlParser.parse(document);
+    // '<' in the payload means it is already a document. A router could also
+    // inline the listing as actual markup, in which case the parser has
+    // already built the document. Any other non-empty shape is an answer
+    // this code cannot read: an error, never an empty table.
+    const rawListing = res.NewPortListing;
+    let parsed: any;
+    if (rawListing !== null && typeof rawListing === "object" && "PortMappingList" in rawListing) {
+      parsed = rawListing;
+    } else {
+      const portListing = fieldValue(rawListing);
+      if (!portListing) {
+        const holdsContent =
+          rawListing !== null &&
+          typeof rawListing === "object" &&
+          Object.keys(rawListing).some((key) => !key.startsWith("@_") && key !== "#text");
+        if (holdsContent) {
+          throw new Error("Unrecognized NewPortListing shape in GetListOfPortMappings response");
+        }
+        return [];
+      }
+      const document = portListing.includes("<")
+        ? portListing
+        : decodeXmlEntities(portListing);
+      parsed = xmlParser.parse(document);
+    }
     const list = parsed?.PortMappingList?.PortMappingEntry;
     if (!list) return [];
 

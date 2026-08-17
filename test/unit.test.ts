@@ -3557,6 +3557,21 @@ function getSoapFaultCode(xml: string): number | null {
     }
   });
 
+  await test("createMapping leaves the caller's options untouched", async () => {
+    // Defaulting the internal port wrote into the caller's own object —
+    // visible whenever callers reuse or log their options.
+    const restore = installFakeRouter("opnsense");
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: "172.16.32.143" });
+    const priv: { host: string; port?: number } = { host: "192.168.5.5" };
+    try {
+      await client.createMapping({ public: 8080, private: priv });
+      assertEqual("port" in priv, false, "the caller's object gains nothing");
+    } finally {
+      client.close();
+      restore();
+    }
+  });
+
   await test("no internal client address is an error, not an empty element", async () => {
     // A failed kernel route query degraded to "" and createMapping put
     // <NewInternalClient></NewInternalClient> on the wire — a baffling 402

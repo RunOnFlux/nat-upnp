@@ -584,7 +584,9 @@ function normalizeOptions(options: StandardOpts, lowestPort: 0 | 1 = 1) {
   // becomes a number, so no path can reacquire a lenient parse.
   function toObject(addr: StandardOpts["public"]): { port?: number | string; host?: string } {
     if (typeof addr === "number" || typeof addr === "string") return { port: addr };
-    if (typeof addr === "object" && addr !== null) return addr;
+    // A copy: the internal-port default below must not write into the
+    // caller's own object.
+    if (typeof addr === "object" && addr !== null) return { ...addr };
     return {};
   }
 

@@ -2450,7 +2450,9 @@ function getSoapFaultCode(xml: string): number | null {
         assertEqual(config!.maxBodyLength, 2 * 1024 * 1024, "body size cap");
         assertEqual(config!.timeout, 10000, "timeout");
         assertEqual(config!.maxRedirects, 2, "redirect cap");
-        assert(config!.httpAgent !== undefined, "keep-alive agent");
+        // The agent exists to force keepAlive off: Node 19+ turned it on by
+        // default, and miniupnpd answers a kept-alive socket with hang-ups.
+        assertEqual((config!.httpAgent as { keepAlive?: boolean }).keepAlive, false, "keep-alive forced off");
       }
     } finally {
       (axiosModule as any).get = realGet;

@@ -12,6 +12,7 @@ import {
   installFakeRouter,
   requests,
   setEmptyTable,
+  setV1Table,
   setV2Overrides,
   setV2Escaped,
   portListing,
@@ -1390,6 +1391,33 @@ function getSoapFaultCode(xml: string): number | null {
     } finally {
       client.close();
       (axiosModule as any).post = fakePost;
+      restore();
+    }
+  });
+
+  await test("a multi-entry table comes back whole and in order", async () => {
+    // The fake's captured table holds a single entry, so a walk that dropped
+    // or merged everything after the first row passed the whole suite. Three
+    // distinct rows, every field pinned per row.
+    const restore = installFakeRouter("opnsense");
+    setV1Table([
+      { external: 16137, internal: 16137, host: "192.168.1.60", description: "Flux_One", ttl: 3600 },
+      { external: 16147, internal: 9090, host: "192.168.1.61", description: "Flux_Two", ttl: 60 },
+      { external: 25565, internal: 25565, host: "192.168.1.62", description: "Flux_Three", ttl: 0, protocol: "UDP" },
+    ]);
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+    try {
+      const mappings = await client.getMappings();
+      assertEqual(mappings.length, 3, "all three rows are returned");
+      const rows = mappings.map(
+        (m) => `${m.public.port}:${m.private.host}:${m.private.port}:${m.protocol}:${m.description}:${m.ttl}`
+      );
+      assertEqual(rows[0], "16137:192.168.1.60:16137:tcp:Flux_One:3600", "row 0");
+      assertEqual(rows[1], "16147:192.168.1.61:9090:tcp:Flux_Two:60", "row 1");
+      assertEqual(rows[2], "25565:192.168.1.62:25565:udp:Flux_Three:0", "row 2");
+    } finally {
+      setV1Table(null);
+      client.close();
       restore();
     }
   });

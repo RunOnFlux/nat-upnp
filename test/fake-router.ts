@@ -68,6 +68,42 @@ export function setEmptyTable(on: boolean): void {
   emptyTable = on;
 }
 
+/** A v1 table row a test wants served; protocol defaults to TCP. */
+export interface V1TableEntry {
+  external: number;
+  internal: number;
+  host: string;
+  description: string;
+  ttl: number;
+  protocol?: string;
+}
+
+/**
+ * When set, the v1 table holds these rows instead of the single captured
+ * entry: index N answers with the router's own captured response carrying
+ * row N's fields — same document, same dialect, different row — and any
+ * index past the end answers the way the capture shows end-of-table.
+ */
+export let v1Table: V1TableEntry[] | null = null;
+export function setV1Table(entries: V1TableEntry[] | null): void {
+  v1Table = entries;
+}
+
+function fillEntry(xml: string, entry: V1TableEntry): string {
+  const fields: [string, string | number][] = [
+    ["NewExternalPort", entry.external],
+    ["NewProtocol", entry.protocol ?? "TCP"],
+    ["NewInternalPort", entry.internal],
+    ["NewInternalClient", entry.host],
+    ["NewPortMappingDescription", entry.description],
+    ["NewLeaseDuration", entry.ttl],
+  ];
+  for (const [tag, value] of fields) {
+    xml = xml.replace(new RegExp(`(<((?:[\\w-]+:)?${tag})>)[^<]*(</\\2>)`), `$1${value}$3`);
+  }
+  return xml;
+}
+
 /** Ways a router can fail that a captured response cannot express. */
 export type Breakage =
   | "transport" // socket died mid-request
@@ -278,7 +314,15 @@ export function installFakeRouter(router: string, breakage?: Breakage): () => vo
     const synthetic = v2Response(action);
     if (synthetic) return { data: synthetic };
 
-    const xml = loadFixture(fixtureFor(router, action, body));
+    let xml: string;
+    if (v1Table && action === "GetGenericPortMappingEntry") {
+      const entry = v1Table[Number(readTag(body, "NewPortMappingIndex"))];
+      xml = entry
+        ? fillEntry(loadFixture(`${router}-soap-GetGenericPortMappingEntry.xml`), entry)
+        : loadFixture(`${router}-soap-GetGenericPortMappingEntry_Empty.xml`);
+    } else {
+      xml = loadFixture(fixtureFor(router, action, body));
+    }
     // A fault arrives as an HTTP error carrying the fault body, the shape the
     // device code unwraps to recover the UPnP error code.
     if (isSoapFault(xml)) throw { response: { data: xml, status: 500 } };

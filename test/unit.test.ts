@@ -3242,6 +3242,7 @@ function getSoapFaultCode(xml: string): number | null {
           assertEqual(m.private.port, router.genericEntry.internal, "internal port");
           assertEqual(m.protocol, router.genericEntry.protocol, "protocol");
           assertEqual(m.description, router.genericEntry.description, "description");
+          assertEqual(m.ttl, router.genericEntry.ttl, "lease ttl");
         }
 
         if (router.specificEntry) {
@@ -3250,6 +3251,7 @@ function getSoapFaultCode(xml: string): number | null {
           assertEqual(hit!.private.host, router.specificEntry.host, "specific internal host");
           assertEqual(hit!.private.port, router.specificEntry.internal, "specific internal port");
           assertEqual(hit!.description, router.specificEntry.description, "specific description");
+          assertEqual(hit!.ttl, router.specificEntry.ttl, "specific lease ttl");
         }
 
         // A missing mapping answers whatever this router's capture shows: a
@@ -3271,6 +3273,7 @@ function getSoapFaultCode(xml: string): number | null {
           assert(phantom !== null, "the echoing router returns its entry as a phantom");
           assertEqual(phantom!.private.port, router.specificEntry!.internal, "the phantom is the mapped entry");
           assertEqual(phantom!.description, router.specificEntry!.description, "the phantom's description");
+          assertEqual(phantom!.ttl, router.specificEntry!.ttl, "the phantom's lease ttl");
         }
       } finally {
         client.close();
@@ -3304,14 +3307,12 @@ function getSoapFaultCode(xml: string): number | null {
           router.ttl60Code === 725 ? router.ttl0Code : router.ttl60Code;
         await expectLease(60, timedOutcome, "timed lease");
 
-        // Delete either succeeds or reports a UPnP fault; it must never hang or
-        // return something that is not a response.
-        try {
-          const removed = await client.removeMapping({ public: 8080 });
-          assert(removed !== undefined, "delete response");
-        } catch (err) {
-          assert(err instanceof UpnpError, `delete should fail as UpnpError, got ${err}`);
-        }
+        // The delete outcome is the router's own capture: every surveyed
+        // router accepted it, so the call must resolve. A future capture that
+        // refuses lands on the guard and gets its fault asserted deliberately.
+        assertEqual(router.deleteCode, null, `unhandled delete fault ${router.deleteCode}`);
+        const removed = await client.removeMapping({ public: 8080 });
+        assert(removed !== undefined, "delete response");
       } finally {
         client.close();
         restore();

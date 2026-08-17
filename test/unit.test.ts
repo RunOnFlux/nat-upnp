@@ -3429,6 +3429,25 @@ function getSoapFaultCode(xml: string): number | null {
     });
   }
 
+  await test("getMappingRange refuses a nonsense numberOfPorts", async () => {
+    // NewNumberOfPorts is ui2 on the wire and miniupnpd truncates oversized
+    // values rather than refusing them — validation on the way in is the
+    // only defence, the same rule the ports follow.
+    const restore = installFakeRouter("sercomm-gpon");
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+    try {
+      for (const bad of [-1, 1.5, 65536, NaN]) {
+        await expectThrow(
+          () => client.getMappingRange({ startPort: 1, endPort: 65535, numberOfPorts: bad }),
+          `numberOfPorts ${bad}`
+        );
+      }
+    } finally {
+      client.close();
+      restore();
+    }
+  });
+
   await test("getMappingRange reads NewProtocol from the listing, not from the request", async () => {
     // Every captured listing in the corpus is TCP-only, so asking for UDP is
     // what separates a value read out of the router's answer from one copied

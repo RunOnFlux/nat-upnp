@@ -328,7 +328,7 @@ export class Client implements IClient {
       ["NewEndPort", String(validPort(options.endPort, "endPort", 0))],
       ["NewProtocol", protocol],
       ["NewManage", options.manage ? "1" : "0"],
-      ["NewNumberOfPorts", String(options.numberOfPorts ?? 1000)],
+      ["NewNumberOfPorts", String(validPort(options.numberOfPorts ?? 1000, "numberOfPorts", 0))],
     ]);
 
     const res = findResponseKey(data, "GetListOfPortMappingsResponse");

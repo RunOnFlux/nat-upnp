@@ -3115,7 +3115,16 @@ function getSoapFaultCode(xml: string): number | null {
       ssdp.close();
       ssdp.close();
       const before = fake.sockets.length;
-      ssdp.search(IGD);
+      // A search on a closed instance must refuse, not hand back an emitter
+      // that queues behind a drain that will never come.
+      let threw = false;
+      try {
+        ssdp.search(IGD);
+      } catch (err) {
+        threw = true;
+        assert(/closed/.test((err as Error).message), `got: ${(err as Error).message}`);
+      }
+      assert(threw, "search after close throws instead of queueing forever");
       await settle();
       assertEqual(fake.sockets.length, before, "no socket is created after close");
     } finally {

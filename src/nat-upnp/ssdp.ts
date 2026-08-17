@@ -107,6 +107,12 @@ export class Ssdp implements ISsdp {
   }
 
   public search(device: string, emitter?: SsdpEmitter): SsdpEmitter {
+    // A search queued on a closed instance would wait forever: close cleared
+    // the queue and nothing drains it again.
+    if (this.closed) {
+      throw new Error("Ssdp is closed");
+    }
+
     if (!emitter) {
       emitter = new EventEmitter() as SsdpEmitter;
     }

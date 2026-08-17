@@ -130,7 +130,7 @@ export class Client implements IClient {
       ["NewLeaseDuration", lease],
     ];
 
-    const requested = options.ttl ?? 60 * 30;
+    const requested = validTtl(options.ttl ?? 60 * 30, "ttl");
 
     try {
       return await info.gateway.run("AddPortMapping", args(requested));
@@ -142,7 +142,7 @@ export class Client implements IClient {
       // identically would fail identically, and 501 says only that something
       // went wrong, which is no basis for guessing.
       const refusedTheLease =
-        err instanceof UpnpError && err.code === ONLY_PERMANENT_LEASES && Number(requested) !== 0;
+        err instanceof UpnpError && err.code === ONLY_PERMANENT_LEASES && requested !== 0;
       if (!refusedTheLease) throw err;
       return info.gateway.run("AddPortMapping", args(0));
     }
@@ -295,7 +295,7 @@ export class Client implements IClient {
       ["NewInternalClient", ports.internal.host || localAddress],
       ["NewEnabled", 1],
       ["NewPortMappingDescription", options.description || "node:nat:upnp"],
-      ["NewLeaseDuration", options.ttl ?? 60 * 30],
+      ["NewLeaseDuration", validTtl(options.ttl ?? 60 * 30, "ttl")],
     ]);
 
     const res = findResponseKey(data, "AddAnyPortMappingResponse");
@@ -517,6 +517,21 @@ function validPort(value: unknown, what: string, lowest: 0 | 1 = 1): number {
     );
   }
   return port;
+}
+
+/**
+ * A lease duration is ui4 on the wire and gets the port treatment: a
+ * truncating firmware maps a lease the caller never asked for and answers
+ * success, and nothing read back can reveal it.
+ */
+function validTtl(value: unknown, what: string): number {
+  const ttl = typeof value === "string" && /^\d+$/.test(value) ? Number(value) : value;
+  if (typeof ttl !== "number" || !Number.isInteger(ttl) || ttl < 0 || ttl > 4294967295) {
+    throw new Error(
+      `${what} must be an integer between 0 and 4294967295, got ${JSON.stringify(value)}`
+    );
+  }
+  return ttl;
 }
 
 function validProtocol(value: string | undefined): string {

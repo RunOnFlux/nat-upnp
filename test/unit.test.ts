@@ -3466,6 +3466,37 @@ function getSoapFaultCode(xml: string): number | null {
     });
   }
 
+  await test("a nonsense ttl is refused before the wire", async () => {
+    // NewLeaseDuration is ui4 on the wire and gets the port treatment: a
+    // truncating firmware maps a lease the caller never asked for and answers
+    // success, and nothing read back can reveal it.
+    const restore = installFakeRouter("sercomm-gpon");
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+    try {
+      for (const bad of [-5, 1.5, 4294967296, NaN, "3600x", "0x1F"]) {
+        for (const call of ["createMapping", "createAnyMapping"] as const) {
+          const err = await expectThrow(
+            () => (client[call] as (o: object) => Promise<unknown>)({ public: 8080, private: 8080, ttl: bad }),
+            `${call} ttl ${bad}`
+          );
+          assert(
+            /ttl must be an integer/.test((err as Error).message),
+            `${call} ttl ${bad}: the validator is the rejector, got: ${(err as Error).message}`
+          );
+        }
+      }
+      await client.createMapping({ public: 8080, private: 8080, ttl: "3600" as unknown as number });
+      const req = requests.filter((r) => r.action === "AddPortMapping").pop();
+      assert(
+        req!.body.includes("<NewLeaseDuration>3600</NewLeaseDuration>"),
+        "a whole-digit string ttl lands as its number"
+      );
+    } finally {
+      client.close();
+      restore();
+    }
+  });
+
   await test("getMappingRange refuses a nonsense numberOfPorts", async () => {
     // NewNumberOfPorts is ui2 on the wire and miniupnpd truncates oversized
     // values rather than refusing them — validation on the way in is the

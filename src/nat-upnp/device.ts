@@ -236,6 +236,14 @@ export class Device implements IDevice {
       actions.push(String(actionList.name));
     }
 
+    // A real SCPD always advertises actions. A parseable non-SCPD body — a
+    // captive portal, an error page — reaches here with none, and resolving
+    // would cache it as a real answer; only rejection routes down the retry
+    // path.
+    if (actions.length === 0) {
+      throw new Error(`Invalid SCPD from ${service.SCPDURL}: no actions`);
+    }
+
     const actionSet = new Set(actions);
     const versionMatch = service.service.match(/:(\d+)$/);
     const serviceVersion = versionMatch ? parseInt(versionMatch[1], 10) : 1;

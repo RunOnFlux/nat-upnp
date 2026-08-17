@@ -2195,6 +2195,79 @@ function getSoapFaultCode(xml: string): number | null {
     }
   });
 
+  await test("a garbage 200 SCPD is not cached as all-false capabilities", async () => {
+    // A captive portal or error page can answer the SCPD URL with parseable
+    // markup that is not an SCPD. Reading zero actions out of it and caching
+    // that as a success would pin every capability false for the life of the
+    // device — the one failure shape the transport retry path never sees.
+    const restore = installFakeRouter("opnsense");
+    const fakeGet = axiosModule.get;
+    let scpdAttempts = 0;
+    let garbageNext = true;
+    (axiosModule as any).get = async (url: string) => {
+      if (url !== DESCRIPTION_URL) {
+        scpdAttempts += 1;
+        if (garbageNext) {
+          garbageNext = false;
+          return {
+            data: "<html><head><title>Login</title></head><body>portal</body></html>",
+            status: 200,
+          };
+        }
+      }
+      return fakeGet(url);
+    };
+    const device = new Device(DESCRIPTION_URL);
+    try {
+      assertEqual(await device.getCapabilities(), null, "an actionless document reports null, not all-false");
+      const recovered = await device.getCapabilities();
+      assert(recovered !== null, "the next call refetches instead of serving the pinned garbage");
+      assert(recovered!.actions.length > 0, "the healed answer carries the real action list");
+      assertEqual(scpdAttempts, 2, "the SCPD was fetched again");
+    } finally {
+      (axiosModule as any).get = fakeGet;
+      restore();
+    }
+  });
+
+  await test("a garbage 200 SCPD is not pinned by the gateway info cache", async () => {
+    // Same shape through the client path: the UpnpInfo layer must treat the
+    // actionless-document null like the transport-failure null it already
+    // clears, or one portal page disables every v2 action until restart.
+    const restore = installFakeRouter("sercomm-gpon");
+    const fakeGet = axiosModule.get;
+    let scpdAttempts = 0;
+    let garbageNext = true;
+    (axiosModule as any).get = async (url: string) => {
+      if (url !== DESCRIPTION_URL) {
+        scpdAttempts += 1;
+        if (garbageNext) {
+          garbageNext = false;
+          return {
+            data: "<html><head><title>Login</title></head><body>portal</body></html>",
+            status: 200,
+          };
+        }
+      }
+      return fakeGet(url);
+    };
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+    try {
+      const err = await expectThrow(
+        () => client.removeMappingRange({ startPort: 16137, endPort: 16137 }),
+        "v2 action while the SCPD answer is garbage"
+      );
+      assert(/SCPD unavailable/.test((err as Error).message), `got: ${(err as Error).message}`);
+      const res = await client.removeMappingRange({ startPort: 16137, endPort: 16137 });
+      assert(res !== undefined, "the next call retries and succeeds");
+      assertEqual(scpdAttempts, 2, "the SCPD was fetched again through the client path");
+    } finally {
+      (axiosModule as any).get = fakeGet;
+      client.close();
+      restore();
+    }
+  });
+
   await test("a failed device-info fetch is not pinned by the gateway info cache", async () => {
     const restore = installFakeRouter("opnsense");
     const fakeGet = axiosModule.get;

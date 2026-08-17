@@ -3219,6 +3219,17 @@ function getSoapFaultCode(xml: string): number | null {
         if (router.connectionStatus) {
           const status = await client.getStatusInfo();
           assertEqual(status.connectionStatus, router.connectionStatus, "connection status");
+        } else {
+          // No status was recorded because the router refused the action:
+          // the capture is a fault, and it must surface as that fault.
+          const capture = loadFixture(`${router.slug}-soap-GetStatusInfo.xml`);
+          const code = capture.match(/<errorCode>(\d+)</)?.[1];
+          assert(code !== undefined, "an empty connectionStatus means the capture is a fault");
+          const err = await expectThrow(() => client.getStatusInfo(), "getStatusInfo on a refusing router");
+          assert(
+            err instanceof UpnpError && String(err.code) === code,
+            `the captured fault ${code} surfaces, got ${err}`
+          );
         }
 
         // The walk must terminate whatever code this router ends it with.
@@ -3241,13 +3252,25 @@ function getSoapFaultCode(xml: string): number | null {
           assertEqual(hit!.description, router.specificEntry.description, "specific description");
         }
 
-        // A missing mapping resolves to null on any router answering 713/714.
+        // A missing mapping answers whatever this router's capture shows: a
+        // 713/714 fault resolves to null, and a success document means the
+        // router ignores the port argument — its mapped entry comes back as a
+        // phantom for any port asked, and nothing in the response reveals it.
         if (router.notFoundCode === 713 || router.notFoundCode === 714) {
           assertEqual(
             await client.getMapping({ public: UNMAPPED_PORT }),
             null,
             `not-found ${router.notFoundCode} should resolve to null`
           );
+        } else {
+          assertEqual(router.notFoundCode, null, "the only other surveyed shape is a success answer");
+          const capture = loadFixture(`${router.slug}-soap-GetSpecificPortMappingEntry_NotFound.xml`);
+          assert(!/<errorCode>/.test(capture), "notFoundCode null must mean a fault-free capture");
+          assert(router.specificEntry !== null, "an echoing router carries its mapped entry");
+          const phantom = await client.getMapping({ public: UNMAPPED_PORT });
+          assert(phantom !== null, "the echoing router returns its entry as a phantom");
+          assertEqual(phantom!.private.port, router.specificEntry!.internal, "the phantom is the mapped entry");
+          assertEqual(phantom!.description, router.specificEntry!.description, "the phantom's description");
         }
       } finally {
         client.close();

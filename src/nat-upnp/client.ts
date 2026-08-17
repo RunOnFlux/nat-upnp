@@ -164,9 +164,19 @@ export class Client implements IClient {
     const localAddress = await info.getLocalAddress();
     const results: Mapping[] = [];
 
-    // Cap iteration to prevent infinite loops from malicious/broken routers
+    // Cap the walk against routers that answer every index and never signal
+    // end-of-table. Reaching the cap is the router malfunctioning, not the
+    // listing completing — the spec's ui2 table-size ceiling is 65535 and no
+    // surveyed firmware holds more than a few hundred — so it is an error
+    // like any other mid-walk failure, never a listing passed off as
+    // complete.
     const MAX_MAPPINGS = 10000;
-    for (let i = 0; i < MAX_MAPPINGS; i++) {
+    for (let i = 0; ; i++) {
+      if (i >= MAX_MAPPINGS) {
+        throw new Error(
+          `Mapping table walk passed ${MAX_MAPPINGS} entries without an end-of-table answer`
+        );
+      }
       let data: RawResponse;
       try {
         data = await info.gateway.run("GetGenericPortMappingEntry", [

@@ -1,7 +1,7 @@
 import { readFileSync, existsSync, readdirSync } from "fs";
 import { join } from "path";
 import { XMLParser } from "fast-xml-parser";
-import axiosModule from "axios";
+import axiosModule, { type AxiosRequestConfig } from "axios";
 import { UpnpError, UPNP_ERROR_CODES, decodeXmlEntities } from "../src/nat-upnp/device";
 import { Device } from "../src/nat-upnp/device";
 import { Client } from "../src/nat-upnp/client";
@@ -1358,6 +1358,40 @@ function getSoapFaultCode(xml: string): number | null {
       "getMappings with a 501 mid-walk"
     );
     assert(err instanceof UpnpError && err.code === 501, `expected the 501 to surface, got ${err}`);
+  });
+
+  await test("the walk cap is an error, not a complete table", async () => {
+    // A firmware that answers every index never ends the table, so the cap is
+    // where the walk gives up on a malfunctioning router — and the entries
+    // collected by then are a partial listing, which must never pass for a
+    // complete one. Every index is answered here by rewriting it to the
+    // fake's index 0.
+    const restore = installFakeRouter("opnsense");
+    const fakePost = axiosModule.post;
+    let walkCalls = 0;
+    (axiosModule as any).post = async (url: string, body: string, config?: AxiosRequestConfig<string>) => {
+      if (/<NewPortMappingIndex>\d+<\/NewPortMappingIndex>/.test(body)) {
+        walkCalls += 1;
+        body = body.replace(
+          /<NewPortMappingIndex>\d+<\/NewPortMappingIndex>/,
+          "<NewPortMappingIndex>0</NewPortMappingIndex>"
+        );
+      }
+      return fakePost(url, body, config);
+    };
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+    try {
+      const err = await expectThrow(
+        () => client.getMappings(),
+        "getMappings against an every-index router"
+      );
+      assert(/end-of-table/.test((err as Error).message), `got: ${(err as Error).message}`);
+      assertEqual(walkCalls, 10000, "the walk stopped at the cap");
+    } finally {
+      client.close();
+      (axiosModule as any).post = fakePost;
+      restore();
+    }
   });
 
   await test("a bare getMappings marks the machine's own mapping local", async () => {

@@ -1741,6 +1741,41 @@ function getSoapFaultCode(xml: string): number | null {
     }
   });
 
+  // Every router the survey caught answering the v2 mutating actions gets its
+  // real capture driven through the client — the synthetic template exists
+  // only for routers that never contributed one, and the fake already prefers
+  // a capture when one is on disk.
+  const v2CapturedRouters = [...routers, ...surveyedRouters.map((r) => r.slug)].filter((slug) =>
+    existsSync(join(fixturesDir, `${slug}-soap-AddAnyPortMapping.xml`))
+  );
+
+  await test("the survey captured the v2 mutating actions on 23 routers", () => {
+    // The hollow-loop guard: a renamed or dropped fixture must shrink this
+    // count, not silently skip the router.
+    assertEqual(v2CapturedRouters.length, 23, "routers driven against real v2 captures");
+  });
+
+  for (const router of v2CapturedRouters) {
+    await test(`${router}: createAnyMapping reads the reserved port from the capture`, async () => {
+      // The expected port comes off the raw capture by regex, independent of
+      // the XML pipeline under test.
+      const raw = loadFixture(`${router}-soap-AddAnyPortMapping.xml`);
+      const expected = Number(raw.match(/<NewReservedPort>(\d+)<\/NewReservedPort>/)?.[1]);
+      assert(Number.isInteger(expected), `${router}: capture carries a reserved port`);
+      const result = await withRouter(router, (c) =>
+        c.createAnyMapping({ public: 16137, private: 16137 })
+      );
+      assertEqual(result.reservedPort, expected, `${router}: reserved port`);
+    });
+
+    await test(`${router}: removeMappingRange resolves its captured answer as success`, async () => {
+      const res = await withRouter(router, (c) =>
+        c.removeMappingRange({ startPort: 16137, endPort: 16137 })
+      );
+      assert(res !== undefined && res !== null, `${router}: the captured response resolves`);
+    });
+  }
+
   await test("removeMappingRange sends the range and the manage flag", async () => {
     await withRouter("technicolor", (c) =>
       c.removeMappingRange({ startPort: 100, endPort: 200, protocol: "udp", manage: true })

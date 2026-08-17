@@ -121,12 +121,14 @@ export class Client implements IClient {
     const localAddress = await info.getLocalAddress();
     const ports = normalizeOptions(options);
 
+    const internalClient = internalClientFor(ports.internal.host, localAddress);
+
     const args = (lease: number | string): (string | number)[][] => [
       ["NewRemoteHost", ports.remote.host ?? ""],
       ["NewExternalPort", String(ports.remote.port)],
       ["NewProtocol", validProtocol(options.protocol)],
       ["NewInternalPort", String(ports.internal.port)],
-      ["NewInternalClient", ports.internal.host || localAddress],
+      ["NewInternalClient", internalClient],
       ["NewEnabled", 1],
       ["NewPortMappingDescription", options.description || "node:nat:upnp"],
       ["NewLeaseDuration", lease],
@@ -294,7 +296,7 @@ export class Client implements IClient {
       ["NewExternalPort", String(ports.remote.port)],
       ["NewProtocol", validProtocol(options.protocol)],
       ["NewInternalPort", String(ports.internal.port)],
-      ["NewInternalClient", ports.internal.host || localAddress],
+      ["NewInternalClient", internalClientFor(ports.internal.host, localAddress)],
       ["NewEnabled", 1],
       ["NewPortMappingDescription", options.description || "node:nat:upnp"],
       ["NewLeaseDuration", validTtl(options.ttl ?? 60 * 30, "ttl")],
@@ -519,6 +521,22 @@ function validPort(value: unknown, what: string, lowest: 0 | 1 = 1): number {
     );
   }
   return port;
+}
+
+/**
+ * The address a new mapping points at. A failed route query resolves the
+ * local address to "" — and an empty NewInternalClient gets a baffling 402
+ * from strict firmware, or a mapping to nothing reported as success from
+ * lenient firmware. The absence is an error before the wire, not an element.
+ */
+function internalClientFor(host: string | undefined, localAddress: string): string {
+  const client = host || localAddress;
+  if (!client) {
+    throw new Error(
+      "No internal client address: none was given and the local address could not be determined"
+    );
+  }
+  return client;
 }
 
 /**

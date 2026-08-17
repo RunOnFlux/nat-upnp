@@ -55,6 +55,9 @@ async function test(name: string, fn: () => Promise<void> | void) {
   }
 }
 
+/** Keeps a deliberately-abandoned rejection from surfacing as unhandled. */
+function noopHandler(): void {}
+
 function assert(condition: boolean, msg: string) {
   if (!condition) throw new Error(msg);
 }
@@ -3549,6 +3552,30 @@ function getSoapFaultCode(xml: string): number | null {
     } finally {
       client.close();
       restore();
+    }
+  });
+
+  await test("no internal client address is an error, not an empty element", async () => {
+    // A failed kernel route query degraded to "" and createMapping put
+    // <NewInternalClient></NewInternalClient> on the wire — a baffling 402
+    // from strict firmware, or a mapping to nothing reported as success.
+    const fake = installFakeDgram();
+    const restore = installFakeRouter("opnsense");
+    const client = new Client({});
+    try {
+      const pending = client.createMapping({ public: 8080, private: 8080 });
+      pending.catch(noopHandler);
+      await settle();
+      FakeSocket.failNextConnect = true;
+      fake.sockets[0].deliver(ssdpResponse(IGD));
+      const err = await expectThrow(() => pending, "createMapping with no determinable internal client");
+      assert(/internal client/i.test((err as Error).message), `got: ${(err as Error).message}`);
+      const req = requests.find((r) => r.action === "AddPortMapping");
+      assert(req === undefined, "nothing went on the wire");
+    } finally {
+      client.close();
+      restore();
+      fake.restore();
     }
   });
 

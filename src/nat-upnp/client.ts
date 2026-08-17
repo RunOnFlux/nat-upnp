@@ -354,6 +354,7 @@ export class Client implements IClient {
     const entries = Array.isArray(list) ? list : [list];
     return entries.map((entry: any) => {
       const host = fieldValue(entry.NewInternalClient);
+      const entryProtocol = fieldValue(entry.NewProtocol);
       return {
         public: {
           host: fieldValue(entry.NewRemoteHost),
@@ -363,9 +364,7 @@ export class Client implements IClient {
         // The entry carries its own protocol; the requested one is only a
         // fallback for a router that omits it. Taking it from the request
         // would relabel anything that came back not matching the filter.
-        protocol: fieldValue(entry.NewProtocol)
-          ? fieldValue(entry.NewProtocol).toLowerCase()
-          : protocol.toLowerCase(),
+        protocol: entryProtocol ? entryProtocol.toLowerCase() : protocol.toLowerCase(),
         enabled: fieldValue(entry.NewEnabled) === "1",
         // The free-text field decodes after the parse, like the other two
         // read paths — the wrapper decode no longer reaches into fields.

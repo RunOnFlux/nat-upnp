@@ -1,6 +1,12 @@
 import net from "net";
 import { setupTest } from "./index.flux-test";
-import { Client, Mapping, UpnpError } from "../src";
+import {
+  Client,
+  Mapping,
+  UpnpError,
+  CapabilityUnavailableError,
+  UnsupportedActionError,
+} from "../src";
 import { execSync } from "node:child_process";
 
 // Set by test/igd2 only. A testcase that has to manufacture a conflict — claim
@@ -269,8 +275,8 @@ setupTest("NAT-UPNP/Client", (opts) => {
         console.log("  createAnyMapping should have thrown but didn't");
         return false;
       } catch (err) {
-        if (err instanceof UpnpError) {
-          console.log("  createAnyMapping correctly rejected:", err.code, err.description);
+        if (err instanceof UnsupportedActionError || err instanceof CapabilityUnavailableError) {
+          console.log("  createAnyMapping correctly rejected:", err.message);
         } else {
           console.log("  createAnyMapping threw unexpected error:", err);
           return false;
@@ -293,8 +299,8 @@ setupTest("NAT-UPNP/Client", (opts) => {
         console.log("  getMappingRange should have thrown but didn't");
         return false;
       } catch (err) {
-        if (err instanceof UpnpError) {
-          console.log("  getMappingRange correctly rejected:", err.code);
+        if (err instanceof UnsupportedActionError || err instanceof CapabilityUnavailableError) {
+          console.log("  getMappingRange correctly rejected:", err.message);
         } else {
           console.log("  getMappingRange threw unexpected error:", err);
           return false;
@@ -315,8 +321,11 @@ setupTest("NAT-UPNP/Client", (opts) => {
         console.log("  removeMappingRange should have thrown but didn't");
         return false;
       } catch (err) {
-        if (err instanceof UpnpError) {
-          console.log("  removeMappingRange correctly rejected:", err.code);
+        if (err instanceof UnsupportedActionError || err instanceof CapabilityUnavailableError) {
+          console.log("  removeMappingRange correctly rejected:", err.message);
+        } else {
+          console.log("  removeMappingRange threw unexpected error:", err);
+          return false;
         }
       }
     }

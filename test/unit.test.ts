@@ -927,9 +927,10 @@ function getSoapFaultCode(xml: string): number | null {
   // pin the behaviour that exists — see the gaps noted alongside them.
 
   await test("mikrotik: a 402 end-of-list still yields the listing", async () => {
-    // MikroTik ends the walk with 402 Invalid Args rather than 713. Past the
-    // first index any UPnP fault means the table ran out, so the entries read
-    // before it are returned instead of the listing throwing.
+    // MikroTik ends the walk with 402 Invalid Args rather than 713. 402 is
+    // one of the three end-of-table codes the walk accepts at any index, so
+    // the entries read before it are returned instead of the listing
+    // throwing.
     const mappings = await withRouter("mikrotik", (c) => c.getMappings());
     assertEqual(mappings.length, 1, "the captured entry survives the 402");
     assertEqual(mappings[0].description, "Dummy inactive rule for windows to work");

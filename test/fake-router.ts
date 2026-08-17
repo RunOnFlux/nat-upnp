@@ -179,8 +179,39 @@ function v2Response(action: string): string | null {
 }
 
 /**
+ * The URLs a router's own description advertises, resolved the way the spec
+ * says: against <URLBase> when present, else against the description URL.
+ */
+function advertisedUrls(rootdesc: string): { scpd: Set<string>; control: Set<string> } {
+  // `||`, not `??`: TP-Link and Omada ship an empty <URLBase></URLBase>,
+  // which counts as absent.
+  const base = rootdesc.match(/<URLBase>([^<]*)<\/URLBase>/)?.[1] || DESCRIPTION_URL;
+  const collect = (tag: string): Set<string> => {
+    const urls = new Set<string>();
+    for (const match of rootdesc.matchAll(new RegExp(`<${tag}>([^<]*)</${tag}>`, "g"))) {
+      urls.add(new URL(match[1], base).href);
+    }
+    return urls;
+  };
+  return { scpd: collect("SCPDURL"), control: collect("controlURL") };
+}
+
+/** Normalized form for comparing a wire URL against the advertised set. */
+function href(url: string): string | null {
+  try {
+    return new URL(url).href;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Serve one router's captured responses in place of the network, so the real
  * client and device code runs end to end. Returns a function that restores axios.
+ *
+ * The fake answers only on the URLs the router's description advertises: a
+ * client that resolves the right URL but sends elsewhere must fail loudly,
+ * not be served by its SOAPAction header alone.
  *
  * `breakage` replaces the SOAP response with a failure a fixture cannot
  * represent, which is the only way into the retry and fault-unwrapping paths.
@@ -190,14 +221,24 @@ export function installFakeRouter(router: string, breakage?: Breakage): () => vo
   const realPost = axios.post;
   requests.length = 0;
 
-  (axios as any).get = async (url: string) => ({
-    data:
-      url === DESCRIPTION_URL
-        ? loadFixture(`${router}-rootdesc.xml`)
-        : loadFixture(`${router}-scpd.xml`),
-  });
+  const rootdesc = loadFixture(`${router}-rootdesc.xml`);
+  const advertised = advertisedUrls(rootdesc);
 
-  (axios as any).post = async (_url: string, body: string, config: any) => {
+  (axios as any).get = async (url: string) => {
+    if (href(url) === href(DESCRIPTION_URL)) return { data: rootdesc };
+    if (advertised.scpd.has(href(url) ?? "")) {
+      return { data: loadFixture(`${router}-scpd.xml`) };
+    }
+    throw new Error(`fake router: GET ${url}, which ${router}'s description never advertised`);
+  };
+
+  (axios as any).post = async (url: string, body: string, config: any) => {
+    if (!advertised.control.has(href(url) ?? "")) {
+      throw new Error(
+        `fake router: POST ${url}, which ${router}'s description never advertised as a control URL`
+      );
+    }
+
     const soapAction = String(JSON.parse(config.headers.SOAPAction));
     const action = soapAction.slice(soapAction.indexOf("#") + 1);
     requests.push({ action, body, headers: config.headers });

@@ -43,8 +43,9 @@ export class Ssdp implements ISsdp {
     // `bound` still gates sending, so callers never get an unbound socket.
     this.socket = socket;
 
+    // No closed-check needed: close() strips this listener in the same
+    // synchronous block that sets the flag, so delivery cannot outlive it.
     socket.on("message", (message) => {
-      if (this.closed) return;
       this.parseResponse(message.toString("utf-8"));
     });
 

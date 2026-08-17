@@ -169,12 +169,19 @@ export class Ssdp implements ISsdp {
     if (this.socket) {
       try {
         this.socket.removeAllListeners();
+        // The socket can still emit an error after close — a pending send
+        // callback, a teardown race — and an "error" with no listener is a
+        // process-killing throw.
+        this.socket.on("error", ignoreLateError);
         this.socket.close();
       } catch { /* already closed */ }
       this.socket = null;
     }
   }
 }
+
+/** A released socket's late error has no one left to tell. */
+function ignoreLateError(): void {}
 
 /**
  * Deliver an error only where someone is listening: an unhandled "error"

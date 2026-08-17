@@ -3132,6 +3132,28 @@ function getSoapFaultCode(xml: string): number | null {
     }
   });
 
+  await test("a late error after close cannot become an unhandled crash", async () => {
+    // close() releases the socket's listeners, but real dgram can still emit
+    // an error afterwards — a pending send callback, a teardown race. An
+    // emit with no listener attached throws ERR_UNHANDLED_ERROR.
+    const fake = installFakeDgram();
+    const ssdp = new Ssdp();
+    try {
+      ssdp.search(IGD);
+      await settle();
+      ssdp.close();
+      let crashed = false;
+      try {
+        fake.sockets[0].emit("error", new Error("late teardown error"));
+      } catch {
+        crashed = true;
+      }
+      assert(!crashed, "the late error is swallowed, not unhandled");
+    } finally {
+      fake.restore();
+    }
+  });
+
   await test("a custom source port is used for the bind", async () => {
     const fake = installFakeDgram();
     const ssdp = new Ssdp({ sourcePort: 1901 });

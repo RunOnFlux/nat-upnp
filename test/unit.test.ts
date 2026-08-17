@@ -2365,6 +2365,68 @@ function getSoapFaultCode(xml: string): number | null {
     }
   });
 
+  await test("attributed device-info fields read their text, not [object Object]", async () => {
+    // The YAMAHA RTX810 hangs Microsoft datatype attributes off its values,
+    // which makes the parser hand back an object; String() on that is
+    // "[object Object]". fieldValue reaches for the text — these five fields
+    // did not use it.
+    const restore = installFakeRouter("opnsense");
+    const realGet = axiosModule.get;
+    (axiosModule as any).get = async () => ({
+      data:
+        '<?xml version="1.0"?><root xmlns="urn:schemas-upnp-org:device-1-0" configId="77">' +
+        "<specVersion><major>1</major><minor>0</minor></specVersion><device>" +
+        "<deviceType>urn:schemas-upnp-org:device:InternetGatewayDevice:1</deviceType>" +
+        "<friendlyName>G</friendlyName><manufacturer>M</manufacturer>" +
+        '<manufacturerURL dt:dt="string" xmlns:dt="urn:x">http://vendor.example/</manufacturerURL>' +
+        '<modelURL dt:dt="string" xmlns:dt="urn:x">http://vendor.example/model</modelURL>' +
+        '<serialNumber dt:dt="string" xmlns:dt="urn:x">SER123</serialNumber>' +
+        '<UDN dt:dt="string" xmlns:dt="urn:x">uuid:00000001</UDN>' +
+        '<presentationURL dt:dt="string" xmlns:dt="urn:x">http://192.0.2.9/</presentationURL>' +
+        "</device></root>",
+    });
+    try {
+      const info = await new Device(DESCRIPTION_URL).getDeviceInfo();
+      assert(info !== null, "device info resolves");
+      assertEqual(info!.manufacturerURL, "http://vendor.example/", "manufacturerURL");
+      assertEqual(info!.modelURL, "http://vendor.example/model", "modelURL");
+      assertEqual(info!.serialNumber, "SER123", "serialNumber");
+      assertEqual(info!.UDN, "uuid:00000001", "UDN");
+      assertEqual(info!.presentationURL, "http://192.0.2.9/", "presentationURL");
+    } finally {
+      (axiosModule as any).get = realGet;
+      restore();
+    }
+  });
+
+  await test("attributed SCPD action names still match capabilities", async () => {
+    // An attributed <name> read with String() becomes "[object Object]" and
+    // matches no capability flag — the router's v2 support silently vanishes.
+    const restore = installFakeRouter("sercomm-gpon");
+    const realGet = axiosModule.get;
+    (axiosModule as any).get = async (url: string) => {
+      const res = await realGet(url);
+      if (url !== DESCRIPTION_URL) {
+        return {
+          data: (res as { data: string }).data.replace(
+            /<name>AddAnyPortMapping<\/name>/,
+            '<name dt:dt="string" xmlns:dt="urn:x">AddAnyPortMapping</name>'
+          ),
+        };
+      }
+      return res;
+    };
+    try {
+      const caps = await new Device(DESCRIPTION_URL).getCapabilities();
+      assert(caps !== null, "capabilities resolve");
+      assert(caps!.actions.includes("AddAnyPortMapping"), `actions carry the attributed name, got ${caps!.actions.join(",")}`);
+      assertEqual(caps!.supportsAddAnyPortMapping, true, "the capability flag still matches");
+    } finally {
+      (axiosModule as any).get = realGet;
+      restore();
+    }
+  });
+
   await test("a failed device-info fetch is not pinned by the gateway info cache", async () => {
     const restore = installFakeRouter("opnsense");
     const fakeGet = axiosModule.get;

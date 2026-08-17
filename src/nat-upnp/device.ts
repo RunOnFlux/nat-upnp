@@ -169,14 +169,14 @@ export class Device implements IDevice {
     const info: GatewayDevice = {
       friendlyName: text(device.friendlyName),
       manufacturer: text(device.manufacturer),
-      manufacturerURL: String(device.manufacturerURL ?? ""),
+      manufacturerURL: text(device.manufacturerURL),
       modelDescription: text(device.modelDescription),
       modelName: text(device.modelName),
       modelNumber: text(device.modelNumber),
-      modelURL: String(device.modelURL ?? ""),
-      serialNumber: String(device.serialNumber ?? ""),
-      UDN: String(device.UDN ?? ""),
-      presentationURL: String(device.presentationURL ?? ""),
+      modelURL: text(device.modelURL),
+      serialNumber: text(device.serialNumber),
+      UDN: text(device.UDN),
+      presentationURL: text(device.presentationURL),
       specVersion: {
         major: Number(root.specVersion?.major) || 0,
         minor: Number(root.specVersion?.minor) || 0,
@@ -230,10 +230,12 @@ export class Device implements IDevice {
     const actions: string[] = [];
     if (Array.isArray(actionList)) {
       for (const a of actionList) {
-        if (a?.name) actions.push(String(a.name));
+        const name = fieldValue(a?.name);
+        if (name) actions.push(name);
       }
-    } else if (actionList?.name) {
-      actions.push(String(actionList.name));
+    } else {
+      const name = fieldValue(actionList?.name);
+      if (name) actions.push(name);
     }
 
     // A real SCPD always advertises actions. A parseable non-SCPD body — a

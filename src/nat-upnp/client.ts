@@ -412,10 +412,6 @@ export class Client implements IClient {
     const promise = new Promise<UpnpInfo>((resolve, reject) => {
       const timeout = setTimeout(() => {
         p.emit("end");
-        if (this.cachedInfo) {
-          resolve(this.cachedInfo);
-          return;
-        }
         if (!resolved) {
           resolved = true;
           reject(new Error("Connection timed out while searching for the gateway."));
@@ -441,18 +437,12 @@ export class Client implements IClient {
 
       // A socket failure is answered immediately with the real error —
       // EADDRINUSE is fixable on this machine, "no router here" is not, and
-      // waiting for the timer to expire erased that difference. A cached
-      // gateway is still served, exactly as the timeout path does.
+      // waiting for the timer to expire erased that difference.
       p.on("error", (err) => {
         if (resolved) return;
         resolved = true;
         p.emit("end");
         clearTimeout(timeout);
-
-        if (this.cachedInfo) {
-          resolve(this.cachedInfo);
-          return;
-        }
         reject(err);
       });
 

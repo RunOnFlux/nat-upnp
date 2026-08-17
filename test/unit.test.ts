@@ -3572,6 +3572,27 @@ function getSoapFaultCode(xml: string): number | null {
     }
   });
 
+  await test("a supplied localAddress is honoured in discovery mode", async () => {
+    // The constructor accepted and stored it, then discovery built its
+    // UpnpInfo without it — the kernel route query answered instead of the
+    // caller.
+    const fake = installFakeDgram();
+    const restore = installFakeRouter("opnsense");
+    const client = new Client({ localAddress: "10.9.9.9" });
+    try {
+      const pending = client.getGateway();
+      pending.catch(noopHandler);
+      await settle();
+      fake.sockets[0].deliver(ssdpResponse(IGD));
+      const info = await pending;
+      assertEqual(await info.getLocalAddress(), "10.9.9.9", "the caller's address wins");
+    } finally {
+      client.close();
+      restore();
+      fake.restore();
+    }
+  });
+
   await test("no internal client address is an error, not an empty element", async () => {
     // A failed kernel route query degraded to "" and createMapping put
     // <NewInternalClient></NewInternalClient> on the wire — a baffling 402

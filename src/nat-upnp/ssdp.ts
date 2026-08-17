@@ -69,10 +69,15 @@ export class Ssdp implements ISsdp {
     // `on`, not `once`: a second error on a dead socket must land here too,
     // or it is an unhandled "error" event and the process dies.
     socket.on("error", (err) => {
+      // A socket this instance has already replaced has no one to tell: its
+      // searches were failed when it died, and delivering its late error
+      // would hand a stale failure to the replacement's searches and mark
+      // the instance unbound after the replacement already drained the
+      // pending queue — stranding every search from then on.
+      if (this.socket !== socket) return;
+
       this.bound = false;
-      if (this.socket === socket) {
-        this.socket = null;
-      }
+      this.socket = null;
       try { socket.close(); } catch { /* already closed */ }
 
       // The real failure goes to every search waiting on this socket —

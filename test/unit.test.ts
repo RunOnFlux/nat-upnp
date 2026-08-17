@@ -2987,6 +2987,45 @@ function getSoapFaultCode(xml: string): number | null {
     }
   });
 
+  await test("a stale error from a replaced socket does not poison the instance", async () => {
+    // A dead socket can emit a second, late error — the handler stays
+    // attached so that cannot crash the process. But the late error belongs
+    // to nobody: handing it to searches on the replacement socket, or
+    // flipping the instance unbound after the replacement is already
+    // listening, strands every later search behind a "socket ready" signal
+    // that already fired.
+    const fake = installFakeDgram();
+    const ssdp = new Ssdp();
+    try {
+      FakeSocket.failNextBind = true;
+      const first = ssdp.search(IGD);
+      let firstErr: Error | null = null;
+      first.on("error", (err) => { firstErr = err; });
+      await settle();
+      assert(firstErr !== null, "the bind failure reaches the first search");
+
+      const healthy = ssdp.search(IGD);
+      const healthyErrs: Error[] = [];
+      healthy.on("error", (err) => healthyErrs.push(err));
+      await settle();
+      assertEqual(fake.sockets[1].sent.length, 1, "the replacement socket serves the second search");
+
+      fake.sockets[0].emit("error", new Error("stale error from the dead socket"));
+      await settle();
+      assertEqual(healthyErrs.length, 0, "the healthy search hears nothing");
+
+      const later = ssdp.search(IGD);
+      const laterErrs: Error[] = [];
+      later.on("error", (err) => laterErrs.push(err));
+      await settle();
+      assertEqual(fake.sockets[1].sent.length, 2, "a later search still sends");
+      assertEqual(laterErrs.length, 0, "and hears no stale error either");
+    } finally {
+      ssdp.close();
+      fake.restore();
+    }
+  });
+
   await test("close stops delivery and releases the socket", async () => {
     const fake = installFakeDgram();
     const ssdp = new Ssdp();

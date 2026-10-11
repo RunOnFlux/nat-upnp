@@ -10,6 +10,7 @@ export {
 export type {
   GatewayDevice,
   ServiceCapabilities,
+  RequestOpts,
   ResolvedService,
   RawService,
   RawDevice,

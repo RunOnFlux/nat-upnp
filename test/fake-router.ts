@@ -116,6 +116,15 @@ export type Breakage =
 export const requests: { action: string; body: string; headers: Record<string, string> }[] = [];
 
 /**
+ * Runs as each request arrives, before it is answered: a test aborts here to
+ * cancel a request in flight.
+ */
+export let onRequest: (() => void) | null = null;
+export function setOnRequest(fn: (() => void) | null): void {
+  onRequest = fn;
+}
+
+/**
  * Responses for the three IGD v2 actions.
  *
  * These are SYNTHETIC, built from the IGD:2 service template, not captured from
@@ -275,9 +284,14 @@ export function installFakeRouter(router: string, breakage?: Breakage): () => vo
       );
     }
 
+    // As axios does: a request whose signal has aborted is never sent, and
+    // one that aborts in flight is cancelled rather than answered.
+    if (config.signal?.aborted) throw new axios.CanceledError();
     const soapAction = String(JSON.parse(config.headers.SOAPAction));
     const action = soapAction.slice(soapAction.indexOf("#") + 1);
     requests.push({ action, body, headers: config.headers });
+    onRequest?.();
+    if (config.signal?.aborted) throw new axios.CanceledError();
 
     switch (breakage) {
       case "transport":
@@ -332,5 +346,6 @@ export function installFakeRouter(router: string, breakage?: Breakage): () => vo
   return () => {
     (axios as any).get = realGet;
     (axios as any).post = realPost;
+    onRequest = null;
   };
 }

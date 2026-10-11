@@ -184,6 +184,21 @@ try {
 
 `getMappings()` throws if a mid-iteration error occurs (e.g., network failure), so the caller knows they have incomplete data rather than silently receiving partial results. End-of-list signals (714, 713) are handled normally.
 
+## Cancelling a Request
+
+Every method that talks to the router takes a `signal` (an `AbortSignal`) with its options; `getStatusInfo`, `getPublicIp` and `getGateway` take it as `{ signal }`. Aborting it cancels the request: one not yet sent is never sent, one in flight has its socket closed, and the call rejects with `signal.reason`. A `getMappings` walk stops at the entry in flight and rejects; it never answers with the entries it read before the abort.
+
+```typescript
+// Give the whole walk 75 seconds, however many entries the table holds.
+const mine = await client.getMappings({ local: true, signal: AbortSignal.timeout(75_000) });
+
+const controller = new AbortController();
+const pending = client.removeMapping({ public: 8080, signal: controller.signal });
+controller.abort(); // pending rejects with controller.signal.reason
+```
+
+The gateway, its description and its capabilities are fetched once and shared between concurrent calls. Aborting one call ends only that call's wait for them; the fetch runs on for the others.
+
 ## Constructor Options
 
 | Option | Type | Default | Description |

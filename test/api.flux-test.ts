@@ -242,6 +242,58 @@ setupTest("NAT-UPNP/Client", (opts) => {
     return mapping !== null && mapping.private.port === testPort;
   });
 
+  opts.run("An aborted signal creates nothing on the router", async () => {
+    const testPort = globalPort[0] + 300;
+    const controller = new AbortController();
+    const reason = new Error("the caller gave up");
+    controller.abort(reason);
+    let rejectedWith: unknown = null;
+    try {
+      await client.createMapping({ public: testPort, ttl: 60, signal: controller.signal });
+    } catch (err) {
+      rejectedWith = err;
+    }
+    const mapping = await client.getMapping({ public: testPort, protocol: "TCP" });
+    console.log("  Rejected with the reason:", rejectedWith === reason, "Mapping:", mapping);
+    return rejectedWith === reason && mapping === null;
+  });
+
+  opts.run("A walk aborted part way rejects, and the router answers the next walk in full", async () => {
+    // A client of its own in url mode, so the device whose requests are
+    // counted is the one the walk uses.
+    const info = await client.getGateway();
+    const walker = new Client({
+      url: info.gateway.description,
+      localAddress: await info.getLocalAddress(),
+    });
+    const controller = new AbortController();
+    const reason = new Error("the caller gave up");
+    try {
+      const device = (await walker.getGateway()).gateway;
+      const run = device.run.bind(device);
+      let sent = 0;
+      device.run = (action, args, options) => {
+        const request = run(action, args, options);
+        if (++sent === 3) controller.abort(reason);
+        return request;
+      };
+      let rejectedWith: unknown = null;
+      try {
+        await walker.getMappings({ signal: controller.signal });
+      } catch (err) {
+        rejectedWith = err;
+      }
+      device.run = run;
+      const mappings = await walker.getMappings();
+      const allFound = globalPort.every((port) => mappings.some((m) => m.public.port === port));
+      console.log("  Rejected with the reason:", rejectedWith === reason, "Requests:", sent);
+      console.log("  Next walk:", mappings.length, "mappings, all five found:", allFound);
+      return rejectedWith === reason && sent === 3 && allFound;
+    } finally {
+      walker.close();
+    }
+  });
+
   opts.run("Delete port mappings", async () => {
     for (let i = 0; i < 5; i++) {
       console.log("  Remove mapping for", globalPort[i]);

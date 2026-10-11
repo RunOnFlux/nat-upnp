@@ -9,6 +9,8 @@ import Device, {
   fieldValue,
   xmlParser,
   ONLY_PERMANENT_LEASES,
+  RequestOpts,
+  untilAborted,
 } from "./device";
 import Ssdp from "./ssdp";
 
@@ -117,8 +119,9 @@ export class Client implements IClient {
   }
 
   public async createMapping(options: NewPortMappingOpts): Promise<RawResponse> {
-    const info = await this.getGateway();
-    const localAddress = await info.getLocalAddress();
+    const { signal } = options;
+    const info = await this.getGateway({ signal });
+    const localAddress = await untilAborted(info.getLocalAddress(), signal);
     const ports = normalizeOptions(options);
 
     const internalClient = internalClientFor(ports.internal.host, localAddress);
@@ -137,7 +140,7 @@ export class Client implements IClient {
     const requested = validTtl(options.ttl ?? 60 * 30, "ttl");
 
     try {
-      return await info.gateway.run("AddPortMapping", args(requested));
+      return await info.gateway.run("AddPortMapping", args(requested), { signal });
     } catch (err) {
       // 725 is the router stating it keeps permanent mappings only. Asking
       // again without a lease gives the caller more than it requested rather
@@ -148,24 +151,30 @@ export class Client implements IClient {
       const refusedTheLease =
         err instanceof UpnpError && err.code === ONLY_PERMANENT_LEASES && requested !== 0;
       if (!refusedTheLease) throw err;
-      return info.gateway.run("AddPortMapping", args(0));
+      return info.gateway.run("AddPortMapping", args(0), { signal });
     }
   }
 
   public async removeMapping(options: DeletePortMappingOpts): Promise<RawResponse> {
-    const info = await this.getGateway();
+    const { signal } = options;
+    const info = await this.getGateway({ signal });
     const ports = normalizeOptions(options, 0);
 
-    return info.gateway.run("DeletePortMapping", [
-      ["NewRemoteHost", ports.remote.host ?? ""],
-      ["NewExternalPort", String(ports.remote.port)],
-      ["NewProtocol", validProtocol(options.protocol)],
-    ]);
+    return info.gateway.run(
+      "DeletePortMapping",
+      [
+        ["NewRemoteHost", ports.remote.host ?? ""],
+        ["NewExternalPort", String(ports.remote.port)],
+        ["NewProtocol", validProtocol(options.protocol)],
+      ],
+      { signal }
+    );
   }
 
   public async getMappings(options: GetMappingOpts = {}): Promise<Mapping[]> {
-    const info = await this.getGateway();
-    const localAddress = await info.getLocalAddress();
+    const { signal } = options;
+    const info = await this.getGateway({ signal });
+    const localAddress = await untilAborted(info.getLocalAddress(), signal);
     const results: Mapping[] = [];
 
     // Cap the walk against routers that answer every index and never signal
@@ -183,9 +192,11 @@ export class Client implements IClient {
       }
       let data: RawResponse;
       try {
-        data = await info.gateway.run("GetGenericPortMappingEntry", [
-          ["NewPortMappingIndex", i],
-        ]);
+        data = await info.gateway.run(
+          "GetGenericPortMappingEntry",
+          [["NewPortMappingIndex", i]],
+          { signal }
+        );
       } catch (err) {
         // Routers do not agree on how they signal "no entry at that index".
         // 713 and 714 are the standard answers; MikroTik and the TP-Link/Omada
@@ -224,18 +235,23 @@ export class Client implements IClient {
    * Returns null if the mapping does not exist.
    */
   public async getMapping(options: GetSpecificMappingOpts): Promise<Mapping | null> {
-    const info = await this.getGateway();
-    const localAddress = await info.getLocalAddress();
+    const { signal } = options;
+    const info = await this.getGateway({ signal });
+    const localAddress = await untilAborted(info.getLocalAddress(), signal);
     const protocol = validProtocol(options.protocol);
     const externalPort = validPort(options.public, "public port", 0);
 
     let data: RawResponse;
     try {
-      data = await info.gateway.run("GetSpecificPortMappingEntry", [
-        ["NewRemoteHost", options.remoteHost ?? ""],
-        ["NewExternalPort", String(externalPort)],
-        ["NewProtocol", protocol],
-      ]);
+      data = await info.gateway.run(
+        "GetSpecificPortMappingEntry",
+        [
+          ["NewRemoteHost", options.remoteHost ?? ""],
+          ["NewExternalPort", String(externalPort)],
+          ["NewProtocol", protocol],
+        ],
+        { signal }
+      );
     } catch (err) {
       if (err instanceof UpnpError && (err.code === 714 || err.code === 713)) return null;
       throw err;
@@ -256,9 +272,10 @@ export class Client implements IClient {
     };
   }
 
-  public async getStatusInfo(): Promise<StatusInfo> {
-    const info = await this.getGateway();
-    const data = await info.gateway.run("GetStatusInfo", []);
+  public async getStatusInfo(options: RequestOpts = {}): Promise<StatusInfo> {
+    const { signal } = options;
+    const info = await this.getGateway({ signal });
+    const data = await info.gateway.run("GetStatusInfo", [], { signal });
 
     const res = findResponseKey(data, "GetStatusInfoResponse");
     if (!res) throw new Error("Incorrect response for GetStatusInfo");
@@ -270,9 +287,10 @@ export class Client implements IClient {
     };
   }
 
-  public async getPublicIp(): Promise<string> {
-    const info = await this.getGateway();
-    const data = await info.gateway.run("GetExternalIPAddress", []);
+  public async getPublicIp(options: RequestOpts = {}): Promise<string> {
+    const { signal } = options;
+    const info = await this.getGateway({ signal });
+    const data = await info.gateway.run("GetExternalIPAddress", [], { signal });
 
     const res = findResponseKey(data, "GetExternalIPAddressResponse");
     if (!res) throw new Error("Incorrect response for GetExternalIPAddress");
@@ -285,22 +303,27 @@ export class Client implements IClient {
    * if the requested one is taken. IGD v2 action.
    */
   public async createAnyMapping(options: NewPortMappingOpts): Promise<{ reservedPort: number }> {
-    const info = await this.getGateway();
-    await this.requireCapability(info, "supportsAddAnyPortMapping", "AddAnyPortMapping");
+    const { signal } = options;
+    const info = await this.getGateway({ signal });
+    await this.requireCapability(info, "supportsAddAnyPortMapping", "AddAnyPortMapping", signal);
 
-    const localAddress = await info.getLocalAddress();
+    const localAddress = await untilAborted(info.getLocalAddress(), signal);
     const ports = normalizeOptions(options);
 
-    const data = await info.gateway.run("AddAnyPortMapping", [
-      ["NewRemoteHost", ports.remote.host ?? ""],
-      ["NewExternalPort", String(ports.remote.port)],
-      ["NewProtocol", validProtocol(options.protocol)],
-      ["NewInternalPort", String(ports.internal.port)],
-      ["NewInternalClient", internalClientFor(ports.internal.host, localAddress)],
-      ["NewEnabled", 1],
-      ["NewPortMappingDescription", options.description || "node:nat:upnp"],
-      ["NewLeaseDuration", validTtl(options.ttl ?? 60 * 30, "ttl")],
-    ]);
+    const data = await info.gateway.run(
+      "AddAnyPortMapping",
+      [
+        ["NewRemoteHost", ports.remote.host ?? ""],
+        ["NewExternalPort", String(ports.remote.port)],
+        ["NewProtocol", validProtocol(options.protocol)],
+        ["NewInternalPort", String(ports.internal.port)],
+        ["NewInternalClient", internalClientFor(ports.internal.host, localAddress)],
+        ["NewEnabled", 1],
+        ["NewPortMappingDescription", options.description || "node:nat:upnp"],
+        ["NewLeaseDuration", validTtl(options.ttl ?? 60 * 30, "ttl")],
+      ],
+      { signal }
+    );
 
     const res = findResponseKey(data, "AddAnyPortMappingResponse");
     if (!res) throw new Error("Incorrect response for AddAnyPortMapping");
@@ -309,31 +332,51 @@ export class Client implements IClient {
   }
 
   public async removeMappingRange(options: DeleteMappingRangeOpts): Promise<RawResponse> {
-    const info = await this.getGateway();
-    await this.requireCapability(info, "supportsDeletePortMappingRange", "DeletePortMappingRange");
+    const { signal } = options;
+    const info = await this.getGateway({ signal });
+    await this.requireCapability(
+      info,
+      "supportsDeletePortMappingRange",
+      "DeletePortMappingRange",
+      signal
+    );
 
-    return info.gateway.run("DeletePortMappingRange", [
-      ["NewStartPort", String(validPort(options.startPort, "startPort", 0))],
-      ["NewEndPort", String(validPort(options.endPort, "endPort", 0))],
-      ["NewProtocol", validProtocol(options.protocol)],
-      ["NewManage", options.manage ? "1" : "0"],
-    ]);
+    return info.gateway.run(
+      "DeletePortMappingRange",
+      [
+        ["NewStartPort", String(validPort(options.startPort, "startPort", 0))],
+        ["NewEndPort", String(validPort(options.endPort, "endPort", 0))],
+        ["NewProtocol", validProtocol(options.protocol)],
+        ["NewManage", options.manage ? "1" : "0"],
+      ],
+      { signal }
+    );
   }
 
   public async getMappingRange(options: GetMappingRangeOpts): Promise<Mapping[]> {
-    const info = await this.getGateway();
-    await this.requireCapability(info, "supportsGetListOfPortMappings", "GetListOfPortMappings");
+    const { signal } = options;
+    const info = await this.getGateway({ signal });
+    await this.requireCapability(
+      info,
+      "supportsGetListOfPortMappings",
+      "GetListOfPortMappings",
+      signal
+    );
 
-    const localAddress = await info.getLocalAddress();
+    const localAddress = await untilAborted(info.getLocalAddress(), signal);
     const protocol = validProtocol(options.protocol);
 
-    const data = await info.gateway.run("GetListOfPortMappings", [
-      ["NewStartPort", String(validPort(options.startPort, "startPort", 0))],
-      ["NewEndPort", String(validPort(options.endPort, "endPort", 0))],
-      ["NewProtocol", protocol],
-      ["NewManage", options.manage ? "1" : "0"],
-      ["NewNumberOfPorts", String(validPort(options.numberOfPorts ?? 1000, "numberOfPorts", 0))],
-    ]);
+    const data = await info.gateway.run(
+      "GetListOfPortMappings",
+      [
+        ["NewStartPort", String(validPort(options.startPort, "startPort", 0))],
+        ["NewEndPort", String(validPort(options.endPort, "endPort", 0))],
+        ["NewProtocol", protocol],
+        ["NewManage", options.manage ? "1" : "0"],
+        ["NewNumberOfPorts", String(validPort(options.numberOfPorts ?? 1000, "numberOfPorts", 0))],
+      ],
+      { signal }
+    );
 
     const res = findResponseKey(data, "GetListOfPortMappingsResponse");
     if (!res) throw new Error("Incorrect response for GetListOfPortMappings");
@@ -396,10 +439,16 @@ export class Client implements IClient {
     });
   }
 
-  public async getGateway(): Promise<UpnpInfo> {
+  /**
+   * The gateway, found over SSDP unless a URL was given. Aborting `signal`
+   * ends only this caller's wait: a discovery other callers share runs on.
+   */
+  public async getGateway(options: RequestOpts = {}): Promise<UpnpInfo> {
     if (this.closed) {
       throw new Error("Client is closed");
     }
+    const { signal } = options;
+    signal?.throwIfAborted();
 
     // Direct URL mode — bypass SSDP
     if (this.url) {
@@ -413,10 +462,8 @@ export class Client implements IClient {
     if (this.cachedInfo) return this.cachedInfo;
 
     // Return pending search to avoid duplicate SSDP queries from concurrent callers
-    if (this.pendingGateway) return this.pendingGateway;
-
-    this.pendingGateway = this.discoverGateway();
-    return this.pendingGateway;
+    if (!this.pendingGateway) this.pendingGateway = this.discoverGateway();
+    return untilAborted(this.pendingGateway, signal);
   }
 
   private discoverGateway(): Promise<UpnpInfo> {
@@ -497,9 +544,10 @@ export class Client implements IClient {
   private async requireCapability(
     info: UpnpInfo,
     capability: keyof ServiceCapabilities,
-    action: string
+    action: string,
+    signal?: AbortSignal
   ): Promise<void> {
-    const capabilities = await info.getCapabilities();
+    const capabilities = await untilAborted(info.getCapabilities(), signal);
     if (!capabilities) {
       throw new CapabilityUnavailableError(action);
     }
@@ -673,7 +721,7 @@ export interface StatusInfo {
   readonly uptime: number;
 }
 
-export interface StandardOpts {
+export interface StandardOpts extends RequestOpts {
   public?: number | { port?: number; host?: string };
   private?: number | { port?: number; host?: string };
   protocol?: string;
@@ -686,25 +734,25 @@ export interface NewPortMappingOpts extends StandardOpts {
 
 export type DeletePortMappingOpts = StandardOpts;
 
-export interface GetMappingOpts {
+export interface GetMappingOpts extends RequestOpts {
   local?: boolean;
   description?: RegExp | string;
 }
 
-export interface GetSpecificMappingOpts {
+export interface GetSpecificMappingOpts extends RequestOpts {
   public: number;
   protocol?: string;
   remoteHost?: string;
 }
 
-export interface DeleteMappingRangeOpts {
+export interface DeleteMappingRangeOpts extends RequestOpts {
   startPort: number;
   endPort: number;
   protocol?: string;
   manage?: boolean;
 }
 
-export interface GetMappingRangeOpts {
+export interface GetMappingRangeOpts extends RequestOpts {
   startPort: number;
   endPort: number;
   protocol?: string;
@@ -728,8 +776,8 @@ export interface IClient {
   getMappings(options?: GetMappingOpts): Promise<Mapping[]>;
   getMappingRange(options: GetMappingRangeOpts): Promise<Mapping[]>;
   getMapping(options: GetSpecificMappingOpts): Promise<Mapping | null>;
-  getStatusInfo(): Promise<StatusInfo>;
-  getPublicIp(): Promise<string>;
-  getGateway(): Promise<UpnpInfo>;
+  getStatusInfo(options?: RequestOpts): Promise<StatusInfo>;
+  getPublicIp(options?: RequestOpts): Promise<string>;
+  getGateway(options?: RequestOpts): Promise<UpnpInfo>;
   close(): void;
 }

@@ -1,5 +1,8 @@
 import { readFileSync, existsSync, readdirSync } from "fs";
 import { join } from "path";
+import http from "http";
+import { getEventListeners } from "events";
+import type { AddressInfo } from "net";
 import { XMLParser } from "fast-xml-parser";
 import axiosModule, { type AxiosRequestConfig } from "axios";
 import {
@@ -8,6 +11,7 @@ import {
   UnsupportedActionError,
   UPNP_ERROR_CODES,
   decodeXmlEntities,
+  untilAborted,
 } from "../src/nat-upnp/device";
 import { Device } from "../src/nat-upnp/device";
 import { Client } from "../src/nat-upnp/client";
@@ -21,6 +25,7 @@ import {
   setV1Table,
   setV2Overrides,
   setV2Escaped,
+  setOnRequest,
   portListing,
   DESCRIPTION_URL,
   UNMAPPED_PORT,
@@ -3785,6 +3790,325 @@ function getSoapFaultCode(xml: string): number | null {
       }
     });
   }
+
+  // ========================================
+  // Cancelling a request
+  // ========================================
+  console.log("\n=== Cancelling a request ===\n");
+
+  const everyRequest: [string, (c: Client, signal: AbortSignal) => Promise<unknown>][] = [
+    ["createMapping", (c, signal) => c.createMapping({ public: 16127, signal })],
+    ["createAnyMapping", (c, signal) => c.createAnyMapping({ public: 16127, signal })],
+    ["removeMapping", (c, signal) => c.removeMapping({ public: 16127, signal })],
+    ["removeMappingRange", (c, signal) => c.removeMappingRange({ startPort: 1, endPort: 2, signal })],
+    ["getMappings", (c, signal) => c.getMappings({ signal })],
+    ["getMappingRange", (c, signal) => c.getMappingRange({ startPort: 1, endPort: 2, signal })],
+    ["getMapping", (c, signal) => c.getMapping({ public: 16127, signal })],
+    ["getStatusInfo", (c, signal) => c.getStatusInfo({ signal })],
+    ["getPublicIp", (c, signal) => c.getPublicIp({ signal })],
+  ];
+
+  async function withCancellableRouter(
+    router: string,
+    fn: (client: Client, controller: AbortController, reason: Error) => Promise<void>
+  ): Promise<void> {
+    const restore = installFakeRouter(router);
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+    try {
+      await fn(client, new AbortController(), new Error("the caller gave up"));
+    } finally {
+      client.close();
+      restore();
+      setV1Table(null);
+    }
+  }
+
+  for (const [name, call] of [
+    ...everyRequest,
+    ["getGateway", (c: Client, signal: AbortSignal) => c.getGateway({ signal })] as const,
+  ]) {
+    await test(`${name}: an aborted signal sends nothing and rejects with its reason`, async () => {
+      await withCancellableRouter("nokia-igd-v2", async (client, controller, reason) => {
+        controller.abort(reason);
+        const err = await expectThrow(() => call(client, controller.signal), name);
+        assertEqual(err, reason, "the rejection is the signal's reason");
+        assertEqual(requests.length, 0, "no request reaches the router");
+      });
+    });
+  }
+
+  for (const [name, call] of everyRequest) {
+    await test(`${name}: an abort in flight rejects with its reason and sends nothing more`, async () => {
+      // createMapping retries a refused lease, so a request answered after the
+      // abort would show here as a second one.
+      await withCancellableRouter("nokia-igd-v2", async (client, controller, reason) => {
+        setOnRequest(() => controller.abort(reason));
+        const err = await expectThrow(() => call(client, controller.signal), name);
+        assertEqual(err, reason, "the rejection is the signal's reason");
+        assertEqual(requests.length, 1, "only the cancelled request was sent");
+      });
+    });
+  }
+
+  await test("createMapping: an abort during the retry of a refused lease cancels the retry", async () => {
+    // MikroTik refuses a finite lease with 725, and the client asks again with
+    // a permanent one.
+    await withCancellableRouter("mikrotik", async (client, controller, reason) => {
+      setOnRequest(() => {
+        if (requests.length === 2) controller.abort(reason);
+      });
+      const err = await expectThrow(
+        () => client.createMapping({ public: 16127, ttl: 60, signal: controller.signal }),
+        "createMapping"
+      );
+      assertEqual(err, reason, "the rejection is the signal's reason");
+      assertEqual(requests.length, 2, "the refused request and the cancelled retry");
+      assert(/<NewLeaseDuration>0</.test(requests[1].body), "the cancelled request was the retry");
+    });
+  });
+
+  await test("untilAborted rejects at once on a signal that has already aborted", async () => {
+    const reason = new Error("the caller gave up");
+    const controller = new AbortController();
+    controller.abort(reason);
+    const never = new Promise<never>(() => {});
+    const err = await within(
+      expectThrow(() => untilAborted(never, controller.signal), "untilAborted"),
+      500,
+      "the rejection"
+    );
+    assertEqual(err, reason, "the rejection is the signal's reason");
+  });
+
+  const tableOf = (rows: number) =>
+    Array.from({ length: rows }, (_, i) => ({
+      external: 30000 + i,
+      internal: 30000 + i,
+      host: LOCAL_ADDRESS,
+      description: `Flux_App_${i}`,
+      ttl: 0,
+    }));
+
+  await test("an abort part way through a walk stops it at the request in flight", async () => {
+    await withCancellableRouter("opnsense", async (client, controller, reason) => {
+      setV1Table(tableOf(10));
+      setOnRequest(() => {
+        if (requests.length === 3) controller.abort(reason);
+      });
+      const err = await expectThrow(() => client.getMappings({ signal: controller.signal }), "walk");
+      assertEqual(err, reason, "an aborted walk rejects, never answering with the rows it read");
+      assertEqual(requests.length, 3, "no index past the cancelled one is asked for");
+    });
+  });
+
+  await test("a signal that never aborts changes nothing and keeps no listener", async () => {
+    await withCancellableRouter("opnsense", async (client, controller) => {
+      setV1Table(tableOf(20));
+      const mappings = await client.getMappings({ signal: controller.signal });
+      assertEqual(mappings.length, 20, "the whole table is read");
+      assertEqual(
+        getEventListeners(controller.signal, "abort").length,
+        0,
+        "every request removed its listener"
+      );
+    });
+  });
+
+  await test("aborting one caller leaves a shared discovery to the others", async () => {
+    await withDiscovery({ timeout: 2000 }, async (client, sockets, respond) => {
+      const controller = new AbortController();
+      const reason = new Error("the caller gave up");
+      const aborted = expectThrow(() => client.getGateway({ signal: controller.signal }), "aborted");
+      const other = client.getGateway();
+      await settle();
+      controller.abort(reason);
+      assertEqual(await aborted, reason, "the aborted caller rejects with its reason");
+      respond();
+      const info = await other;
+      assertEqual(info.gateway.description, DESCRIPTION_URL, "the other caller still finds the gateway");
+      const searchesSent = sockets.reduce((n, s) => n + s.sent.length, 0);
+      assertEqual(searchesSent, 1, "one search, shared, and not restarted");
+    });
+  });
+
+  // The fake router replaces axios, so it cannot show what an abort does to a
+  // socket. This one is a real HTTP server on loopback serving opnsense's
+  // description, whose URLs are relative, and answering every action with
+  // end-of-table. What it is told to hold, it answers only on release.
+  interface LoopbackRouter {
+    url: string;
+    descriptionsRequested: () => number;
+    held: Promise<http.IncomingMessage>;
+    release: () => void;
+  }
+
+  async function withLoopbackRouter(
+    hold: "description" | "scpd" | "soap",
+    fn: (router: LoopbackRouter) => Promise<void>
+  ): Promise<void> {
+    const rootdesc = loadFixture("opnsense-rootdesc.xml");
+    const scpd = loadFixture("opnsense-scpd.xml");
+    const endOfTable = loadFixture("opnsense-soap-GetGenericPortMappingEntry_Empty.xml");
+    const waiting: (() => void)[] = [];
+    let descriptions = 0;
+    let markHeld!: (req: http.IncomingMessage) => void;
+    const held = new Promise<http.IncomingMessage>((resolve) => {
+      markHeld = resolve;
+    });
+
+    const server = http.createServer((req, res) => {
+      const isDescription = req.method === "GET" && req.url === "/rootDesc.xml";
+      const isScpd = req.method === "GET" && req.url === "/WANIPCn.xml";
+      if (isDescription) descriptions++;
+      const answer = () => {
+        if (isDescription) {
+          res.end(rootdesc);
+        } else if (isScpd) {
+          res.end(scpd);
+        } else if (req.method === "POST") {
+          res.writeHead(500).end(endOfTable);
+        } else {
+          res.writeHead(404).end();
+        }
+      };
+      const holding =
+        (hold === "description" && isDescription) ||
+        (hold === "scpd" && isScpd) ||
+        (hold === "soap" && req.method === "POST");
+      if (holding) {
+        markHeld(req);
+        waiting.push(answer);
+      } else {
+        answer();
+      }
+    });
+    server.listen(0, "127.0.0.1");
+    await new Promise((resolve) => server.once("listening", resolve));
+    const { port } = server.address() as AddressInfo;
+
+    try {
+      await fn({
+        url: `http://127.0.0.1:${port}/rootDesc.xml`,
+        descriptionsRequested: () => descriptions,
+        held,
+        release: () => waiting.splice(0).forEach((answer) => answer()),
+      });
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  }
+
+  function within<T>(work: Promise<T>, ms: number, what: string): Promise<T> {
+    let timer: NodeJS.Timeout;
+    return Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${what}: not within ${ms}ms`)), ms);
+      }),
+    ]).finally(() => clearTimeout(timer));
+  }
+
+  await test("an abort in flight closes the request's socket", async () => {
+    await withLoopbackRouter("soap", async (router) => {
+      const client = new Client({ url: router.url, localAddress: "127.0.0.1" });
+      const controller = new AbortController();
+      const reason = new Error("the caller gave up");
+      try {
+        const pending = expectThrow(() => client.getMappings({ signal: controller.signal }), "walk");
+        const req = await within(router.held, 2000, "the request reaching the router");
+        const closed = new Promise((resolve) => req.socket.once("close", resolve));
+        controller.abort(reason);
+        assertEqual(await within(pending, 2000, "the rejection"), reason, "it rejects with the reason");
+        await within(closed, 2000, "the router seeing the socket close");
+        assertEqual(
+          getEventListeners(controller.signal, "abort").length,
+          0,
+          "no listener is left on the signal"
+        );
+      } finally {
+        client.close();
+      }
+    });
+  });
+
+  await test("AbortSignal.timeout rejects with its TimeoutError", async () => {
+    await withLoopbackRouter("soap", async (router) => {
+      const client = new Client({ url: router.url, localAddress: "127.0.0.1" });
+      try {
+        const err = await within(
+          expectThrow(() => client.getMappings({ signal: AbortSignal.timeout(100) }), "walk"),
+          2000,
+          "the timeout"
+        );
+        assertEqual((err as Error).name, "TimeoutError", "the reason is the timeout's own");
+      } finally {
+        client.close();
+      }
+    });
+  });
+
+  await test("aborting one caller leaves a shared description fetch to the others", async () => {
+    await withLoopbackRouter("description", async (router) => {
+      const client = new Client({ url: router.url, localAddress: "127.0.0.1" });
+      const controller = new AbortController();
+      const reason = new Error("the caller gave up");
+      try {
+        const aborted = expectThrow(() => client.getMappings({ signal: controller.signal }), "aborted");
+        const other = client.getMappings();
+        await within(router.held, 2000, "the description request");
+        controller.abort(reason);
+        assertEqual(await within(aborted, 2000, "the rejection"), reason, "the aborted caller rejects");
+        router.release();
+        const mappings = await within(other, 2000, "the other caller");
+        assertEqual(mappings.length, 0, "the other caller's walk completes");
+        assertEqual(router.descriptionsRequested(), 1, "the description was fetched once, for both");
+      } finally {
+        client.close();
+      }
+    });
+  });
+
+  await test("aborting one caller leaves a shared capability fetch to the others", async () => {
+    await withLoopbackRouter("scpd", async (router) => {
+      const client = new Client({ url: router.url, localAddress: "127.0.0.1" });
+      const controller = new AbortController();
+      const reason = new Error("the caller gave up");
+      try {
+        const range = { startPort: 1, endPort: 2 };
+        const aborted = expectThrow(
+          () => client.getMappingRange({ ...range, signal: controller.signal }),
+          "aborted"
+        );
+        const other = expectThrow(() => client.getMappingRange(range), "the other caller");
+        await within(router.held, 2000, "the capability request");
+        controller.abort(reason);
+        assertEqual(await within(aborted, 2000, "the rejection"), reason, "the aborted caller rejects");
+        router.release();
+        const err = await within(other, 2000, "the other caller");
+        assert(err instanceof UnsupportedActionError, "the other caller gets the router's real answer");
+      } finally {
+        client.close();
+      }
+    });
+  });
+
+  await test("Device.run with an aborted signal does not start resolving the service", async () => {
+    await withLoopbackRouter("soap", async (router) => {
+      const reason = new Error("the caller gave up");
+      const controller = new AbortController();
+      controller.abort(reason);
+      const device = new Device(router.url);
+      const err = await expectThrow(
+        () => device.run("GetStatusInfo", [], { signal: controller.signal }),
+        "run"
+      );
+      assertEqual(err, reason, "it rejects with the reason");
+      // A fetch started anyway would arrive at the router well within this.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      assertEqual(router.descriptionsRequested(), 0, "the description was never fetched");
+    });
+  });
 
   // ========================================
   // Summary

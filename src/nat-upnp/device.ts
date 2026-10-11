@@ -110,6 +110,32 @@ const axiosDefaults = {
   maxRedirects: 2,
 };
 
+/** Options every router request accepts. */
+export interface RequestOpts {
+  /**
+   * Aborting it cancels the request: one not yet sent is never sent, one in
+   * flight has its socket closed, and the call rejects with `signal.reason`.
+   */
+  signal?: AbortSignal;
+}
+
+/**
+ * Settles with `work`, or rejects with `signal.reason` once the signal aborts.
+ * Only this caller's wait ends: `work` may be shared with other callers, so it
+ * runs on for them.
+ */
+export function untilAborted<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return work;
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    if (signal.aborted) onAbort();
+    else signal.addEventListener("abort", onAbort, { once: true });
+    work
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener("abort", onAbort));
+  });
+}
+
 export class Device implements IDevice {
   readonly description: string;
   readonly services: readonly string[];
@@ -346,9 +372,12 @@ export class Device implements IDevice {
 
   public async run(
     action: string,
-    args: (string | number)[][]
+    args: (string | number)[][],
+    options: RequestOpts = {}
   ): Promise<RawResponse> {
-    const info = await this.resolveService();
+    const { signal } = options;
+    signal?.throwIfAborted();
+    const info = await untilAborted(this.resolveService(), signal);
 
     const argsXml = args
       .map(([name, value]) => `<${name}>${escapeXml(String(value ?? ""))}</${name}>`)
@@ -370,6 +399,7 @@ export class Device implements IDevice {
     try {
       const response = await axios.post(info.controlURL, body, {
         ...axiosDefaults,
+        signal,
         headers: {
           "Content-Type": 'text/xml; charset="utf-8"',
           "Content-Length": "" + Buffer.byteLength(body),
@@ -378,6 +408,7 @@ export class Device implements IDevice {
       });
       responseData = response.data;
     } catch (err: unknown) {
+      if (signal?.aborted) throw signal.reason;
       if (isAxiosErrorWithData(err)) {
         throwIfSoapFault(err.response.data, action);
       }
@@ -648,5 +679,5 @@ export interface IDevice {
     services: RawService[];
     devices: RawDevice[];
   };
-  run(action: string, kvpairs: (string | number)[][]): Promise<RawResponse>;
+  run(action: string, kvpairs: (string | number)[][], options?: RequestOpts): Promise<RawResponse>;
 }

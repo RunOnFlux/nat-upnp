@@ -61,4 +61,8 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: node ./build/test/unit.test.js
-      - run: npm publish --provenance --access public
+      # The trusted publisher allows staging only: a maintainer approves each
+      # version on npmjs.com with 2FA before it is public. `npm stage` needs
+      # npm 11.15.0 or later.
+      - run: npm install -g npm@^11.15.0
+      - run: npm stage publish --provenance --access public

@@ -2,7 +2,7 @@
 
 UPnP port mapping client for Node.js with IGD v1/v2 support, SCPD capability detection, and device info parsing.
 
-Tested against 13 router models across 400+ nodes (OPNsense, pfSense, ASUS, MikroTik, Ubiquiti, TP-Link, Freebox, Nokia, Sagemcom, NEC, Sercomm, Technicolor, Linux IGD).
+Tested against 73 routers, from 1014 captured responses: 13 curated models (OPNsense, pfSense, ASUS, MikroTik, Ubiquiti, TP-Link, Freebox, Nokia, Sagemcom, NEC, Sercomm, Technicolor, Linux IGD) and 60 drawn from a survey of 820 UPnP gateways on the Flux network.
 
 
 ## Installation
@@ -58,6 +58,12 @@ const device = await info.getDevice();
 const caps = await info.getCapabilities();
 const addr = await info.getLocalAddress();
 ```
+
+### Caching the Gateway
+
+With `cacheGateway: true` the gateway found by the first discovery is kept for later calls. A request to it that fails with anything but a UPnP fault - a connection refused or reset, no answer within the request timeout, an answer that is not a SOAP reply - drops it and searches again, since a router whose UPnP service restarts answers on a new port. If the router now answers at a different location, the request is sent there once more; at the same location the original error stands. A UPnP fault, an action the router does not support, and an abort by the caller keep the cached gateway.
+
+A request sent again may find that the first one landed before the router went quiet. `createMapping` then gets 718 for its own mapping, and resolves if the router holds exactly that mapping (same internal client, internal port and description). `removeMapping` gets 714, and `removeMappingRange` 714 or 730, and they resolve. On a first request each of these codes throws as usual. `createAnyMapping` is never sent twice, because the router picks its port.
 
 ### Device Info
 
@@ -125,7 +131,7 @@ const status = await client.getStatusInfo();
 
 ## IGD v2 Actions
 
-Available only if the router advertises them in its SCPD. Throws `UpnpError` (code 401) if not supported.
+Available only if the router advertises them in its SCPD. Throws `UnsupportedActionError` when the router's SCPD does not list the action, and `CapabilityUnavailableError` when the SCPD cannot be read; the next call reads it again.
 
 ```typescript
 // Router assigns port if requested one is taken
@@ -204,7 +210,7 @@ The gateway, its description and its capabilities are fetched once and shared be
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `timeout` | `number` | `1800` | SSDP discovery timeout (ms) |
-| `cacheGateway` | `boolean` | `false` | Cache gateway between calls |
+| `cacheGateway` | `boolean` | `false` | Keep the discovered gateway between calls; see [Caching the Gateway](#caching-the-gateway) |
 | `url` | `string` | — | Bypass SSDP, connect directly |
 | `localAddress` | `string` | — | Required when using `url` |
 

@@ -1,151 +1,208 @@
 import dgram, { Socket } from "dgram";
-import os from "os";
 import EventEmitter from "events";
 
-export class Ssdp implements ISsdp {
-  private sourcePort = this.options?.sourcePort || 0;
-  private bound = false;
-  private boundCount = 0;
-  private closed = false;
+import { resolveLocalAddress } from "./route";
 
-  private readonly queue: [string, SsdpEmitter][] = [];
+/**
+ * SSDP discovery. Finds UPnP devices on the local network via multicast.
+ * One UDP socket, with the search pinned to the interface that carries this
+ * host's internet traffic: a port mapping is only useful on the NAT the
+ * internet reaches us through, and left to itself the kernel routes multicast
+ * by its own table, which an unrelated 224.0.0.0/4 route can point elsewhere.
+ */
+export class Ssdp implements ISsdp {
+  /**
+   * Any public unicast address serves here: it is never sent a packet, only
+   * used to ask the kernel which interface carries internet-bound traffic.
+   */
+  private static readonly INTERNET_ROUTE_PROBE = "8.8.8.8";
+
+  private readonly sourcePort: number;
   private readonly multicast = "239.255.255.250";
   private readonly port = 1900;
-  private readonly sockets;
   private readonly ssdpEmitter: SsdpEmitter = new EventEmitter();
 
-  constructor(private options?: { sourcePort?: number }) {
-    // Create sockets on all external interfaces
-    const interfaces = os.networkInterfaces();
-    this.sockets = Object.keys(interfaces).reduce<Socket[]>(
-      (arr, key) =>
-        arr.concat(
-          interfaces[key]
-            ?.filter((item) => !item.internal)
-            .map((item) => this.createSocket(item)) ?? []
-        ),
-      []
-    );
+  private socket: Socket | null = null;
+  private bound = false;
+  private closed = false;
+  private readonly pendingSearches: [string, SsdpEmitter][] = [];
+
+  constructor(options?: { sourcePort?: number }) {
+    this.sourcePort = options?.sourcePort || 0;
   }
 
-  private createSocket(iface: any) {
-    const socket = dgram.createSocket(
-      iface.family === "IPv4" ? "udp4" : "udp6"
-    );
+  private ensureSocket(): void {
+    if (this.socket || this.closed) return;
 
+    const socket = dgram.createSocket({ type: "udp4", reuseAddr: true });
+
+    // Store the socket now, before the bind resolves. Waiting for "listening"
+    // meant a search arriving during the bind saw no socket and created a
+    // second one; the later bind then overwrote this reference, so close()
+    // released the idle socket and left the one carrying traffic open.
+    // `bound` still gates sending, so callers never get an unbound socket.
+    this.socket = socket;
+
+    // No closed-check needed: close() strips this listener in the same
+    // synchronous block that sets the flag, so delivery cannot outlive it.
     socket.on("message", (message) => {
-      // Ignore messages after closing sockets
-      if (this.closed) return;
-
-      // Parse response
-      this.parseResponse(message.toString(), socket.address as any as string);
+      this.parseResponse(message.toString("utf-8"));
     });
 
-    // Bind in next tick (sockets should be me in this.sockets array)
-    process.nextTick(() => {
-      // Unqueue this._queue once all sockets are ready
-      const onready = () => {
-        if (this.boundCount < this.sockets.length) return;
+    socket.on("listening", async () => {
+      try {
+        const address = await resolveLocalAddress(Ssdp.INTERNET_ROUTE_PROBE);
+        socket.setMulticastInterface(address);
+      } catch {
+        // No route to the internet, or the socket died while the route was
+        // being resolved: leave the egress interface to the OS.
+      }
 
-        this.bound = true;
-        this.queue.forEach(([device, emitter]) => this.search(device, emitter));
-      };
+      if (this.closed || this.socket !== socket) return;
+      this.bound = true;
 
-      socket.on("listening", () => {
-        this.boundCount += 1;
-        onready();
-      });
-
-      // On error - remove socket from list and execute items from queue
-      socket.once("error", () => {
-        socket.close();
-        this.sockets.splice(this.sockets.indexOf(socket), 1);
-        onready();
-      });
-
-      socket.address = iface.address;
-      socket.bind(this.sourcePort, iface.address);
+      while (this.pendingSearches.length > 0) {
+        const [device, emitter] = this.pendingSearches.shift()!;
+        this.search(device, emitter);
+      }
     });
 
-    return socket;
+    // `on`, not `once`: a second error on a dead socket must land here too,
+    // or it is an unhandled "error" event and the process dies.
+    socket.on("error", (err) => {
+      // A socket this instance has already replaced has no one to tell: its
+      // searches were failed when it died, and delivering its late error
+      // would hand a stale failure to the replacement's searches and mark
+      // the instance unbound after the replacement already drained the
+      // pending queue — stranding every search from then on.
+      if (this.socket !== socket) return;
+
+      this.bound = false;
+      this.socket = null;
+      try { socket.close(); } catch { /* already closed */ }
+
+      // The real failure goes to every search waiting on this socket —
+      // queued behind the bind or already subscribed. Silence here left
+      // EADDRINUSE indistinguishable from "no router answered": the
+      // caller's timer expired and reported a router-less network.
+      const pending = this.pendingSearches.splice(0);
+      for (const [, emitter] of pending) {
+        emitError(emitter, err);
+      }
+      emitError(this.ssdpEmitter, err);
+    });
+
+    socket.bind(this.sourcePort);
   }
 
-  private parseResponse(response: string, addr: string) {
-    // Ignore incorrect packets
+  private parseResponse(response: string) {
     if (!/^(HTTP|NOTIFY)/m.test(response)) return;
 
     const headers = parseMimeHeader(response);
-
-    // We are only interested in messages that can be matched against the original
-    // search target
     if (!headers.st) return;
 
-    this.ssdpEmitter.emit("device", headers, addr);
+    // Require a valid HTTP Location header — reject missing, empty, or non-http
+    if (!headers.location || !headers.location.startsWith("http")) return;
+
+    this.ssdpEmitter.emit("device", headers);
   }
 
   public search(device: string, emitter?: SsdpEmitter): SsdpEmitter {
-    if (!emitter) {
-      emitter = new EventEmitter();
-      emitter._ended = false;
-      emitter.once("end", () => {
-        emitter!._ended = true;
-      });
+    // A search queued on a closed instance would wait forever: close cleared
+    // the queue and nothing drains it again.
+    if (this.closed) {
+      throw new Error("Ssdp is closed");
     }
 
+    if (!emitter) {
+      emitter = new EventEmitter() as SsdpEmitter;
+    }
+
+    this.ensureSocket();
+
     if (!this.bound) {
-      this.queue.push([device, emitter]);
+      this.pendingSearches.push([device, emitter]);
       return emitter;
     }
 
     const query = Buffer.from(
       "M-SEARCH * HTTP/1.1\r\n" +
-        "HOST: " +
-        this.multicast +
-        ":" +
-        this.port +
-        "\r\n" +
+        "HOST: " + this.multicast + ":" + this.port + "\r\n" +
         'MAN: "ssdp:discover"\r\n' +
         "MX: 1\r\n" +
-        "ST: " +
-        device +
-        "\r\n" +
+        "ST: " + device + "\r\n" +
         "\r\n"
     );
 
-    // Send query on each socket
-    this.sockets.forEach((socket) =>
-      socket.send(query, 0, query.length, this.port, this.multicast)
-    );
+    this.socket!.send(query, 0, query.length, this.port, this.multicast);
 
-    const ondevice: SearchCallback = (headers, address) => {
-      if (!emitter || emitter._ended || headers.st !== device) return;
+    let ended = false;
 
-      emitter.emit("device", headers, address);
+    const ondevice: SearchCallback = (headers) => {
+      if (ended || headers.st !== device) return;
+      emitter!.emit("device", headers);
     };
-    this.ssdpEmitter.on("device", ondevice);
 
-    // Detach listener after receiving 'end' event
-    emitter.once("end", () =>
-      this.ssdpEmitter.removeListener("device", ondevice)
-    );
+    const onerror = (err: Error) => {
+      if (ended) return;
+      emitError(emitter!, err);
+    };
+
+    this.ssdpEmitter.on("device", ondevice);
+    this.ssdpEmitter.on("error", onerror);
+
+    emitter.once("end", () => {
+      this.ssdpEmitter.removeListener("device", ondevice);
+      this.ssdpEmitter.removeListener("error", onerror);
+      ended = true;
+    });
 
     return emitter;
   }
 
   public close() {
-    this.sockets.forEach((socket) => socket.close());
+    if (this.closed) return;
     this.closed = true;
+    this.bound = false;
+    this.pendingSearches.length = 0;
+    this.ssdpEmitter.removeAllListeners();
+
+    if (this.socket) {
+      try {
+        this.socket.removeAllListeners();
+        // The socket can still emit an error after close — a pending send
+        // callback, a teardown race — and an "error" with no listener is a
+        // process-killing throw.
+        this.socket.on("error", ignoreLateError);
+        this.socket.close();
+      } catch { /* already closed */ }
+      this.socket = null;
+    }
   }
 }
 
-function parseMimeHeader(headerStr: string) {
-  const lines = headerStr.split(/\r\n/g);
+/** A released socket's late error has no one left to tell. */
+function ignoreLateError(): void {}
 
-  // Parse headers from lines to hashmap
+/**
+ * Deliver an error only where someone is listening: an unhandled "error"
+ * event throws, so a caller who never subscribed keeps the timeout behaviour
+ * instead of gaining a crash.
+ */
+function emitError(emitter: EventEmitter, err: Error): void {
+  if (emitter.listenerCount("error") > 0) {
+    emitter.emit("error", err);
+  }
+}
+
+export function parseMimeHeader(headerStr: string) {
+  const lines = headerStr.split(/\r?\n/);
   return lines.reduce<Record<string, string>>((headers, line) => {
-    const [_, key, value] = line.match(/^([^:]*)\s*:\s*(.*)$/) ?? [];
-    if (key && value) {
-      headers[key.toLowerCase()] = value;
+    // Header names are tokens with no whitespace; stopping the name at the
+    // first space keeps "LOCATION : x" from producing the key "location ".
+    const match = line.match(/^([^:\s]+)\s*:\s*(.*)$/);
+    if (match) {
+      headers[match[1].toLowerCase()] = match[2].trimEnd();
     }
     return headers;
   }, {});
@@ -159,14 +216,20 @@ export default Ssdp;
  * ===================
  */
 
-type SearchArgs = [Record<string, string>, string];
+type SearchArgs = [Record<string, string>];
 export type SearchCallback = (...args: SearchArgs) => void;
-type SearchEvent = <E extends Events>(
-  ev: E,
-  ...args: E extends "device" ? SearchArgs : []
-) => boolean;
-type Events = "device" | "end";
-type Event<E extends Events> = E extends "device" ? SearchCallback : () => void;
+type EventArgs<E extends Events> = E extends "device"
+  ? SearchArgs
+  : E extends "error"
+    ? [Error]
+    : [];
+type SearchEvent = <E extends Events>(ev: E, ...args: EventArgs<E>) => boolean;
+type Events = "device" | "end" | "error";
+type Event<E extends Events> = E extends "device"
+  ? SearchCallback
+  : E extends "error"
+    ? (err: Error) => void
+    : () => void;
 type EventListener<T> = <E extends Events>(ev: E, callback: Event<E>) => T;
 
 export interface SsdpEmitter extends EventEmitter {
@@ -174,22 +237,10 @@ export interface SsdpEmitter extends EventEmitter {
   addListener: EventListener<this>;
   once: EventListener<this>;
   on: EventListener<this>;
-
   emit: SearchEvent;
-
-  _ended?: boolean;
 }
 
 export interface ISsdp {
-  /**
-   * Search for a SSDP compatible server on the network
-   * @param device Search Type (ST) header, specifying which device to search for
-   * @param emitter An existing EventEmitter to emit event on
-   * @returns The event emitter provided in Promise, or a newly instantiated one.
-   */
   search(device: string, emitter?: SsdpEmitter): SsdpEmitter;
-  /**
-   * Close all sockets
-   */
   close(): void;
 }

@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+<s:Body>
+<u:GetGenericPortMappingEntryResponse xmlns:u="urn:schemas-upnp-org:service:WANIPConnection:2">
+<NewRemoteHost></NewRemoteHost>
+<NewExternalPort>16162</NewExternalPort>
+<NewProtocol>TCP</NewProtocol>
+<NewInternalPort>16162</NewInternalPort>
+<NewInternalClient>192.168.100.85</NewInternalClient>
+<NewEnabled>1</NewEnabled>
+<NewPortMappingDescription>[redacted]</NewPortMappingDescription>
+<NewLeaseDuration>2173</NewLeaseDuration>
+</u:GetGenericPortMappingEntryResponse>
+</s:Body>
+</s:Envelope>

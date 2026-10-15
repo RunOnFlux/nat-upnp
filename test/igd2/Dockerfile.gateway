@@ -1,0 +1,20 @@
+FROM debian:trixie
+
+# Debian's miniupnpd is built --igd2 (debian/rules CONFIG_ARGS), so the stock
+# package advertises InternetGatewayDevice:2 / WANIPConnection:2 and carries
+# AddAnyPortMapping, DeletePortMappingRange and GetListOfPortMappings. The
+# nftables variant is the one that matches trixie's default iptables backend.
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      miniupnpd-nftables \
+      nftables \
+      iproute2 \
+      uuid-runtime \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY gateway-entrypoint.sh /usr/local/bin/gateway-entrypoint.sh
+RUN chmod +x /usr/local/bin/gateway-entrypoint.sh
+
+EXPOSE 5000/tcp 1900/udp
+
+ENTRYPOINT ["/usr/local/bin/gateway-entrypoint.sh"]

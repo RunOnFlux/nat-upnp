@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" SOAP-ENV:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+	<SOAP-ENV:Body>
+		<m:GetNATRSIPStatusResponse xmlns:m="urn:schemas-upnp-org:service:WANIPConnection:1">
+			<NewRSIPAvailable>0</NewRSIPAvailable>
+			<NewNATEnabled>1</NewNATEnabled>
+		</m:GetNATRSIPStatusResponse>
+	</SOAP-ENV:Body>
+</SOAP-ENV:Envelope>

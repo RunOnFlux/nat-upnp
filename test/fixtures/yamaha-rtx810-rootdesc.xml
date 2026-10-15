@@ -1,0 +1,74 @@
+<?xml version="1.0"?>
+<root xmlns="urn:schemas-upnp-org:device-1-0">
+<specVersion>
+<major>1</major>
+<minor>0</minor>
+</specVersion>
+<URLBase>http://192.168.0.1:2869</URLBase>
+<device>
+<deviceType>urn:schemas-upnp-org:device:InternetGatewayDevice:1</deviceType>
+<friendlyName>YAMAHA RTX810</friendlyName>
+<manufacturer>YAMAHA Corporation</manufacturer>
+<manufacturerURL>http://www.rtpro.yamaha.co.jp</manufacturerURL>
+<modelDescription>Remote router</modelDescription>
+<modelName>RTX810</modelName>
+<UDN>uuid:7347b87a-0000-4000-8000-7347b8000000</UDN>
+<serviceList>
+<service>
+<serviceType>urn:schemas-upnp-org:service:Layer3Forwarding:1</serviceType>
+<serviceId>urn:upnp-org:serviceId:L3Forwarding</serviceId>
+<SCPDURL>/Layer3Forwarding.xml</SCPDURL>
+<controlURL>/Layer3Forwarding</controlURL>
+<eventSubURL>/Layer3Forwarding</eventSubURL>
+</service>
+</serviceList>
+<deviceList>
+<device>
+<deviceType>urn:schemas-upnp-org:device:WANDevice:1</deviceType>
+<friendlyName>YAMAHA RTX810</friendlyName>
+<manufacturer>YAMAHA Corporation</manufacturer>
+<manufacturerURL>http://www.rtpro.yamaha.co.jp</manufacturerURL>
+<modelDescription>Remote router</modelDescription>
+<modelName>RTX810</modelName>
+<modelURL>http://www.rtpro.yamaha.co.jp</modelURL>
+<serialNumber>SERIAL0001</serialNumber>
+<UDN>uuid:823ba047-0000-4000-8000-823ba0000000</UDN>
+<UPC>00000-00001</UPC>
+<serviceList>
+<service>
+<serviceType>urn:schemas-upnp-org:service:WANCommonInterfaceConfig:1</serviceType>
+<serviceId>urn:upnp-org:serviceId:WANCommonIFC1</serviceId>
+<SCPDURL>/WANCommonInterfaceConfig.xml</SCPDURL>
+<controlURL>/WANCommonInterfaceConfig</controlURL>
+<eventSubURL>/WANCommonInterfaceConfig</eventSubURL>
+</service>
+</serviceList>
+<deviceList>
+<device>
+<deviceType>urn:schemas-upnp-org:device:WANConnectionDevice:1</deviceType>
+<friendlyName>YAMAHA RTX810</friendlyName>
+<manufacturer>YAMAHA Corporation</manufacturer>
+<manufacturerURL>http://www.rtpro.yamaha.co.jp</manufacturerURL>
+<modelDescription>Remote router</modelDescription>
+<modelName>RTX810</modelName>
+<modelNumber>1</modelNumber>
+<modelURL>http://www.rtpro.yamaha.co.jp</modelURL>
+<serialNumber>SERIAL0001</serialNumber>
+<UDN>uuid:215f2dee-0000-4000-8000-215f2d000000</UDN>
+<UPC>00000-00001</UPC>
+<serviceList>
+<service>
+<serviceType>urn:schemas-upnp-org:service:WANIPConnection:1</serviceType>
+<serviceId>urn:upnp-org:serviceId:WANIPConn1</serviceId>
+<SCPDURL>/WANIPConnection.xml</SCPDURL>
+<controlURL>/WANIPConnection</controlURL>
+<eventSubURL>/WANIPConnection</eventSubURL>
+</service>
+</serviceList>
+</device>
+</deviceList>
+</device>
+</deviceList>
+<presentationURL>http://192.168.0.1</presentationURL>
+</device>
+</root>

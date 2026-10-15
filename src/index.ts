@@ -1,48 +1,42 @@
-import { Device as impDevice } from "./nat-upnp/device";
-import { Client as impClient } from "./nat-upnp/client";
-import { Ssdp as impSsdp } from "./nat-upnp/ssdp";
-
-namespace natupnp {
-  export const Ssdp = impSsdp;
-  export const Device = impDevice;
-  export const Client = impClient;
-}
-
-export { Device } from "./nat-upnp/device";
-export type { Service, RawService, RawDevice } from "./nat-upnp/device";
+export {
+  Device,
+  UpnpError,
+  CapabilityUnavailableError,
+  UnsupportedActionError,
+  UPNP_ERROR_CODES,
+  ONLY_PERMANENT_LEASES,
+  xmlParser,
+} from "./nat-upnp/device";
+export type {
+  GatewayDevice,
+  ServiceCapabilities,
+  RequestOpts,
+  ResolvedService,
+  RawService,
+  RawDevice,
+} from "./nat-upnp/device";
 
 export { Ssdp } from "./nat-upnp/ssdp";
 export type { SearchCallback, ISsdp, SsdpEmitter } from "./nat-upnp/ssdp";
 
-export { Client } from "./nat-upnp/client";
+export { Client, UpnpInfo } from "./nat-upnp/client";
 export type {
   GetMappingOpts,
+  GetMappingRangeOpts,
+  GetSpecificMappingOpts,
   Mapping,
+  StatusInfo,
+  ResolvedGatewayInfo,
   DeletePortMappingOpts,
+  DeleteMappingRangeOpts,
   NewPortMappingOpts,
   StandardOpts,
+  ClientOptions,
 } from "./nat-upnp/client";
 
-export default natupnp;
-
-/*
- * ===================
- * ====== Types ======
- * ===================
- */
-
 /**
- * Raw SSDP/UPNP repsonse
- * Entire SSDP/UPNP schema is beyond the scope of these typings.
- * Please look up the protol documentation if you wanna do
- * lower level communication.
+ * Raw SOAP response body as parsed by fast-xml-parser.
+ * Keys are response element names (e.g., "GetStatusInfoResponse").
+ * Values are the parsed child elements. Attributes are prefixed with "@_".
  */
-export type RawResponse = Partial<
-  Record<
-    string,
-    {
-      "@": { "xmlns:u": string };
-      [key: string]: unknown;
-    }
-  >
->;
+export type RawResponse = Record<string, unknown>;

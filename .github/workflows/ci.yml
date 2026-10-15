@@ -1,0 +1,64 @@
+name: CI & Publish
+
+on:
+  push:
+    branches: [main, new_features, "feature/*"]
+  pull_request:
+    branches: [main]
+  release:
+    types: [published]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [20.x, 22.x, 24.x]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node-version }}
+      - run: npm ci
+      - run: npm run build
+      - run: node ./build/test/unit.test.js
+
+  # The integration suite could previously only run on a Flux node, by hand, as
+  # root. test/igd2 gives it a gateway in Docker, so it runs here on every push
+  # — once, not across the matrix; what it exercises is the router, not Node.
+  # Deliberately not a gate on publish: it pulls images, so a registry outage
+  # would block a release for a reason unrelated to the code.
+  integration:
+    runs-on: ubuntu-latest
+    if: github.event_name != 'release'
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24.x"
+      - run: npm ci
+      - run: npm run flux-test:igd2
+
+  publish:
+    needs: build-and-test
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24.x"
+          registry-url: "https://registry.npmjs.org"
+      - name: Set version from release tag
+        run: |
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION#v}"
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+      - run: npm ci
+      - run: npm run build
+      - run: node ./build/test/unit.test.js
+      - run: npm publish --provenance --access public

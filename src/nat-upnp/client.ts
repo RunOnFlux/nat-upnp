@@ -118,62 +118,99 @@ export class Client implements IClient {
     this.cacheGateway = options.cacheGateway || false;
   }
 
+  /**
+   * Resolves with the router's answer to AddPortMapping. On a request sent
+   * again after the gateway moved (see `cacheGateway`), a 718 is the first
+   * request having landed: when the router holds this exact mapping - this
+   * internal client, internal port and description - the call resolves with
+   * the router's answer to the lookup that found it.
+   */
   public async createMapping(options: NewPortMappingOpts): Promise<RawResponse> {
     const { signal } = options;
-    const info = await this.getGateway({ signal });
-    const localAddress = await untilAborted(info.getLocalAddress(), signal);
     const ports = normalizeOptions(options);
-
-    const internalClient = internalClientFor(ports.internal.host, localAddress);
-
-    const args = (lease: number | string): (string | number)[][] => [
-      ["NewRemoteHost", ports.remote.host ?? ""],
-      ["NewExternalPort", String(ports.remote.port)],
-      ["NewProtocol", validProtocol(options.protocol)],
-      ["NewInternalPort", String(ports.internal.port)],
-      ["NewInternalClient", internalClient],
-      ["NewEnabled", 1],
-      ["NewPortMappingDescription", options.description || "node:nat:upnp"],
-      ["NewLeaseDuration", lease],
-    ];
-
+    const protocol = validProtocol(options.protocol);
+    const description = options.description || "node:nat:upnp";
     const requested = validTtl(options.ttl ?? 60 * 30, "ttl");
 
-    try {
-      return await info.gateway.run("AddPortMapping", args(requested), { signal });
-    } catch (err) {
-      // 725 is the router stating it keeps permanent mappings only. Asking
-      // again without a lease gives the caller more than it requested rather
-      // than nothing at all, so it is worth one retry. Every other refusal is
-      // left to the caller: 718 means the port is taken and retrying
-      // identically would fail identically, and 501 says only that something
-      // went wrong, which is no basis for guessing.
-      const refusedTheLease =
-        err instanceof UpnpError && err.code === ONLY_PERMANENT_LEASES && requested !== 0;
-      if (!refusedTheLease) throw err;
-      return info.gateway.run("AddPortMapping", args(0), { signal });
-    }
-  }
+    return this.onGateway(signal, async (info, retry) => {
+      const localAddress = await untilAborted(info.getLocalAddress(), signal);
+      const internalClient = internalClientFor(ports.internal.host, localAddress);
 
-  public async removeMapping(options: DeletePortMappingOpts): Promise<RawResponse> {
-    const { signal } = options;
-    const info = await this.getGateway({ signal });
-    const ports = normalizeOptions(options, 0);
-
-    return info.gateway.run(
-      "DeletePortMapping",
-      [
+      const args = (lease: number | string): (string | number)[][] => [
         ["NewRemoteHost", ports.remote.host ?? ""],
         ["NewExternalPort", String(ports.remote.port)],
-        ["NewProtocol", validProtocol(options.protocol)],
-      ],
-      { signal }
-    );
+        ["NewProtocol", protocol],
+        ["NewInternalPort", String(ports.internal.port)],
+        ["NewInternalClient", internalClient],
+        ["NewEnabled", 1],
+        ["NewPortMappingDescription", description],
+        ["NewLeaseDuration", lease],
+      ];
+
+      try {
+        try {
+          return await info.gateway.run("AddPortMapping", args(requested), { signal });
+        } catch (err) {
+          // 725 is the router stating it keeps permanent mappings only. Asking
+          // again without a lease gives the caller more than it requested rather
+          // than nothing at all, so it is worth one retry. Every other refusal is
+          // left to the caller: 718 means the port is taken and retrying
+          // identically would fail identically, and 501 says only that something
+          // went wrong, which is no basis for guessing.
+          const refusedTheLease =
+            err instanceof UpnpError && err.code === ONLY_PERMANENT_LEASES && requested !== 0;
+          if (!refusedTheLease) throw err;
+          return await info.gateway.run("AddPortMapping", args(0), { signal });
+        }
+      } catch (err) {
+        if (!retry || !(err instanceof UpnpError) || err.code !== CONFLICT_IN_MAPPING_ENTRY) throw err;
+        const held = await this.lookUp(info, ports.remote.host ?? "", ports.remote.port, protocol, signal);
+        const isThisMapping =
+          held !== null &&
+          held.mapping.private.host === internalClient &&
+          held.mapping.private.port === ports.internal.port &&
+          held.mapping.description === description;
+        if (!isThisMapping) throw err;
+        return held.raw;
+      }
+    });
+  }
+
+  /**
+   * Resolves with the router's answer to DeletePortMapping. On a request sent
+   * again after the gateway moved (see `cacheGateway`), a 714 is the first
+   * request having landed, and the call resolves with an empty answer.
+   */
+  public async removeMapping(options: DeletePortMappingOpts): Promise<RawResponse> {
+    const { signal } = options;
+    const ports = normalizeOptions(options, 0);
+    const protocol = validProtocol(options.protocol);
+
+    return this.onGateway(signal, async (info, retry) => {
+      try {
+        return await info.gateway.run(
+          "DeletePortMapping",
+          [
+            ["NewRemoteHost", ports.remote.host ?? ""],
+            ["NewExternalPort", String(ports.remote.port)],
+            ["NewProtocol", protocol],
+          ],
+          { signal }
+        );
+      } catch (err) {
+        if (retry && err instanceof UpnpError && err.code === NO_SUCH_ENTRY) return {};
+        throw err;
+      }
+    });
   }
 
   public async getMappings(options: GetMappingOpts = {}): Promise<Mapping[]> {
     const { signal } = options;
-    const info = await this.getGateway({ signal });
+    return this.onGateway(signal, (info) => this.walkMappings(info, options));
+  }
+
+  private async walkMappings(info: UpnpInfo, options: GetMappingOpts): Promise<Mapping[]> {
+    const { signal } = options;
     const localAddress = await untilAborted(info.getLocalAddress(), signal);
     const results: Mapping[] = [];
 
@@ -236,24 +273,40 @@ export class Client implements IClient {
    */
   public async getMapping(options: GetSpecificMappingOpts): Promise<Mapping | null> {
     const { signal } = options;
-    const info = await this.getGateway({ signal });
-    const localAddress = await untilAborted(info.getLocalAddress(), signal);
     const protocol = validProtocol(options.protocol);
     const externalPort = validPort(options.public, "public port", 0);
 
+    return this.onGateway(signal, async (info) => {
+      const held = await this.lookUp(info, options.remoteHost ?? "", externalPort, protocol, signal);
+      return held && held.mapping;
+    });
+  }
+
+  /**
+   * One GetSpecificPortMappingEntry: the mapping and the router's answer it was
+   * read from, or null when the router holds no such entry.
+   */
+  private async lookUp(
+    info: UpnpInfo,
+    remoteHost: string,
+    externalPort: number,
+    protocol: string,
+    signal?: AbortSignal
+  ): Promise<{ mapping: Mapping; raw: RawResponse } | null> {
+    const localAddress = await untilAborted(info.getLocalAddress(), signal);
     let data: RawResponse;
     try {
       data = await info.gateway.run(
         "GetSpecificPortMappingEntry",
         [
-          ["NewRemoteHost", options.remoteHost ?? ""],
+          ["NewRemoteHost", remoteHost],
           ["NewExternalPort", String(externalPort)],
           ["NewProtocol", protocol],
         ],
         { signal }
       );
     } catch (err) {
-      if (err instanceof UpnpError && (err.code === 714 || err.code === 713)) return null;
+      if (err instanceof UpnpError && (err.code === NO_SUCH_ENTRY || err.code === 713)) return null;
       throw err;
     }
 
@@ -262,100 +315,147 @@ export class Client implements IClient {
 
     const host = fieldValue(res.NewInternalClient);
     return {
-      public: { host: options.remoteHost ?? "", port: externalPort },
-      private: { host, port: parseInt(fieldValue(res.NewInternalPort), 10) || 0 },
-      protocol: protocol.toLowerCase(),
-      enabled: fieldValue(res.NewEnabled) === "1",
-      description: decodeXmlEntities(fieldValue(res.NewPortMappingDescription)),
-      ttl: parseInt(fieldValue(res.NewLeaseDuration), 10) || 0,
-      local: isLocal(host, localAddress),
+      mapping: {
+        public: { host: remoteHost, port: externalPort },
+        private: { host, port: parseInt(fieldValue(res.NewInternalPort), 10) || 0 },
+        protocol: protocol.toLowerCase(),
+        enabled: fieldValue(res.NewEnabled) === "1",
+        description: decodeXmlEntities(fieldValue(res.NewPortMappingDescription)),
+        ttl: parseInt(fieldValue(res.NewLeaseDuration), 10) || 0,
+        local: isLocal(host, localAddress),
+      },
+      raw: data,
     };
   }
 
   public async getStatusInfo(options: RequestOpts = {}): Promise<StatusInfo> {
     const { signal } = options;
-    const info = await this.getGateway({ signal });
-    const data = await info.gateway.run("GetStatusInfo", [], { signal });
+    return this.onGateway(signal, async (info) => {
+      const data = await info.gateway.run("GetStatusInfo", [], { signal });
 
-    const res = findResponseKey(data, "GetStatusInfoResponse");
-    if (!res) throw new Error("Incorrect response for GetStatusInfo");
+      const res = findResponseKey(data, "GetStatusInfoResponse");
+      if (!res) throw new Error("Incorrect response for GetStatusInfo");
 
-    return {
-      connectionStatus: fieldValue(res.NewConnectionStatus),
-      lastConnectionError: fieldValue(res.NewLastConnectionError),
-      uptime: parseInt(fieldValue(res.NewUptime), 10) || 0,
-    };
+      return {
+        connectionStatus: fieldValue(res.NewConnectionStatus),
+        lastConnectionError: fieldValue(res.NewLastConnectionError),
+        uptime: parseInt(fieldValue(res.NewUptime), 10) || 0,
+      };
+    });
   }
 
   public async getPublicIp(options: RequestOpts = {}): Promise<string> {
     const { signal } = options;
-    const info = await this.getGateway({ signal });
-    const data = await info.gateway.run("GetExternalIPAddress", [], { signal });
+    return this.onGateway(signal, async (info) => {
+      const data = await info.gateway.run("GetExternalIPAddress", [], { signal });
 
-    const res = findResponseKey(data, "GetExternalIPAddressResponse");
-    if (!res) throw new Error("Incorrect response for GetExternalIPAddress");
+      const res = findResponseKey(data, "GetExternalIPAddressResponse");
+      if (!res) throw new Error("Incorrect response for GetExternalIPAddress");
 
-    return fieldValue(res.NewExternalIPAddress);
+      return fieldValue(res.NewExternalIPAddress);
+    });
   }
 
   /**
    * Create a port mapping, allowing the router to assign a different external port
-   * if the requested one is taken. IGD v2 action.
+   * if the requested one is taken. IGD v2 action. Never sent twice: the router
+   * picks the port, so a second request could hold a second one.
    */
   public async createAnyMapping(options: NewPortMappingOpts): Promise<{ reservedPort: number }> {
     const { signal } = options;
-    const info = await this.getGateway({ signal });
-    await this.requireCapability(info, "supportsAddAnyPortMapping", "AddAnyPortMapping", signal);
-
-    const localAddress = await untilAborted(info.getLocalAddress(), signal);
     const ports = normalizeOptions(options);
+    const protocol = validProtocol(options.protocol);
+    const ttl = validTtl(options.ttl ?? 60 * 30, "ttl");
 
-    const data = await info.gateway.run(
-      "AddAnyPortMapping",
-      [
-        ["NewRemoteHost", ports.remote.host ?? ""],
-        ["NewExternalPort", String(ports.remote.port)],
-        ["NewProtocol", validProtocol(options.protocol)],
-        ["NewInternalPort", String(ports.internal.port)],
-        ["NewInternalClient", internalClientFor(ports.internal.host, localAddress)],
-        ["NewEnabled", 1],
-        ["NewPortMappingDescription", options.description || "node:nat:upnp"],
-        ["NewLeaseDuration", validTtl(options.ttl ?? 60 * 30, "ttl")],
-      ],
-      { signal }
+    return this.onGateway(
+      signal,
+      async (info) => {
+        await this.requireCapability(info, "supportsAddAnyPortMapping", "AddAnyPortMapping", signal);
+
+        const localAddress = await untilAborted(info.getLocalAddress(), signal);
+
+        const data = await info.gateway.run(
+          "AddAnyPortMapping",
+          [
+            ["NewRemoteHost", ports.remote.host ?? ""],
+            ["NewExternalPort", String(ports.remote.port)],
+            ["NewProtocol", protocol],
+            ["NewInternalPort", String(ports.internal.port)],
+            ["NewInternalClient", internalClientFor(ports.internal.host, localAddress)],
+            ["NewEnabled", 1],
+            ["NewPortMappingDescription", options.description || "node:nat:upnp"],
+            ["NewLeaseDuration", ttl],
+          ],
+          { signal }
+        );
+
+        const res = findResponseKey(data, "AddAnyPortMappingResponse");
+        if (!res) throw new Error("Incorrect response for AddAnyPortMapping");
+
+        return { reservedPort: parseInt(fieldValue(res.NewReservedPort), 10) || 0 };
+      },
+      false
     );
-
-    const res = findResponseKey(data, "AddAnyPortMappingResponse");
-    if (!res) throw new Error("Incorrect response for AddAnyPortMapping");
-
-    return { reservedPort: parseInt(fieldValue(res.NewReservedPort), 10) || 0 };
   }
 
+  /**
+   * Resolves with the router's answer to DeletePortMappingRange. On a request
+   * sent again after the gateway moved (see `cacheGateway`), a 730 or 714 is
+   * the first request having landed, and the call resolves with an empty
+   * answer.
+   */
   public async removeMappingRange(options: DeleteMappingRangeOpts): Promise<RawResponse> {
     const { signal } = options;
-    const info = await this.getGateway({ signal });
-    await this.requireCapability(
-      info,
-      "supportsDeletePortMappingRange",
-      "DeletePortMappingRange",
-      signal
-    );
+    const startPort = validPort(options.startPort, "startPort", 0);
+    const endPort = validPort(options.endPort, "endPort", 0);
+    const protocol = validProtocol(options.protocol);
 
-    return info.gateway.run(
-      "DeletePortMappingRange",
-      [
-        ["NewStartPort", String(validPort(options.startPort, "startPort", 0))],
-        ["NewEndPort", String(validPort(options.endPort, "endPort", 0))],
-        ["NewProtocol", validProtocol(options.protocol)],
-        ["NewManage", options.manage ? "1" : "0"],
-      ],
-      { signal }
-    );
+    return this.onGateway(signal, async (info, retry) => {
+      await this.requireCapability(
+        info,
+        "supportsDeletePortMappingRange",
+        "DeletePortMappingRange",
+        signal
+      );
+
+      try {
+        return await info.gateway.run(
+          "DeletePortMappingRange",
+          [
+            ["NewStartPort", String(startPort)],
+            ["NewEndPort", String(endPort)],
+            ["NewProtocol", protocol],
+            ["NewManage", options.manage ? "1" : "0"],
+          ],
+          { signal }
+        );
+      } catch (err) {
+        const nothingLeft =
+          err instanceof UpnpError && (err.code === PORT_MAPPING_NOT_FOUND || err.code === NO_SUCH_ENTRY);
+        if (retry && nothingLeft) return {};
+        throw err;
+      }
+    });
   }
 
   public async getMappingRange(options: GetMappingRangeOpts): Promise<Mapping[]> {
     const { signal } = options;
-    const info = await this.getGateway({ signal });
+    const startPort = validPort(options.startPort, "startPort", 0);
+    const endPort = validPort(options.endPort, "endPort", 0);
+    const protocol = validProtocol(options.protocol);
+    const numberOfPorts = validPort(options.numberOfPorts ?? 1000, "numberOfPorts", 0);
+
+    return this.onGateway(signal, (info) =>
+      this.listRange(info, { startPort, endPort, protocol, numberOfPorts, manage: !!options.manage }, signal)
+    );
+  }
+
+  private async listRange(
+    info: UpnpInfo,
+    range: { startPort: number; endPort: number; protocol: string; numberOfPorts: number; manage: boolean },
+    signal?: AbortSignal
+  ): Promise<Mapping[]> {
+    const { protocol } = range;
     await this.requireCapability(
       info,
       "supportsGetListOfPortMappings",
@@ -364,16 +464,15 @@ export class Client implements IClient {
     );
 
     const localAddress = await untilAborted(info.getLocalAddress(), signal);
-    const protocol = validProtocol(options.protocol);
 
     const data = await info.gateway.run(
       "GetListOfPortMappings",
       [
-        ["NewStartPort", String(validPort(options.startPort, "startPort", 0))],
-        ["NewEndPort", String(validPort(options.endPort, "endPort", 0))],
+        ["NewStartPort", String(range.startPort)],
+        ["NewEndPort", String(range.endPort)],
         ["NewProtocol", protocol],
-        ["NewManage", options.manage ? "1" : "0"],
-        ["NewNumberOfPorts", String(validPort(options.numberOfPorts ?? 1000, "numberOfPorts", 0))],
+        ["NewManage", range.manage ? "1" : "0"],
+        ["NewNumberOfPorts", String(range.numberOfPorts)],
       ],
       { signal }
     );
@@ -464,6 +563,53 @@ export class Client implements IClient {
     // Return pending search to avoid duplicate SSDP queries from concurrent callers
     if (!this.pendingGateway) this.pendingGateway = this.discoverGateway();
     return untilAborted(this.pendingGateway, signal);
+  }
+
+  /**
+   * Runs `request` against the gateway.
+   *
+   * Under `cacheGateway`, a request that fails with anything but a UPnP fault
+   * - no connection, no answer in time, an answer that is not a SOAP reply -
+   * is taken as the gateway possibly having moved: a router whose UPnP service
+   * restarts answers on a new port. The cached gateway is dropped and the
+   * router found again. If it now answers at a different location, `request` runs there
+   * once more with `retry` set; at the same location the original failure
+   * stands. A UPnP fault is the router answering, an abort is the caller's,
+   * and an action the router says it lacks stays lacking, so none of these
+   * look again.
+   *
+   * `retryable: false` drops the cached gateway but never sends the request a
+   * second time.
+   */
+  private async onGateway<T>(
+    signal: AbortSignal | undefined,
+    request: (info: UpnpInfo, retry: boolean) => Promise<T>,
+    retryable = true
+  ): Promise<T> {
+    const info = await this.getGateway({ signal });
+    try {
+      return await request(info, false);
+    } catch (err) {
+      const unanswered =
+        this.cacheGateway &&
+        !this.url &&
+        !signal?.aborted &&
+        !(err instanceof UpnpError) &&
+        !(err instanceof UnsupportedActionError);
+      if (!unanswered) throw err;
+      if (this.cachedInfo === info) this.cachedInfo = null;
+      if (!retryable) throw err;
+
+      let found: UpnpInfo;
+      try {
+        found = await this.getGateway({ signal });
+      } catch (discoveryErr) {
+        if (signal?.aborted) throw discoveryErr;
+        throw err;
+      }
+      if (found.gateway.description === info.gateway.description) throw err;
+      return request(found, true);
+    }
   }
 
   private discoverGateway(): Promise<UpnpInfo> {
@@ -562,6 +708,10 @@ export class Client implements IClient {
  * ====== Utilities ======
  * =======================
  */
+
+const NO_SUCH_ENTRY = 714;
+const CONFLICT_IN_MAPPING_ENTRY = 718;
+const PORT_MAPPING_NOT_FOUND = 730;
 
 /**
  * A port must be a 16-bit integer before it goes anywhere near the wire. The
@@ -764,6 +914,11 @@ export interface ClientOptions {
   timeout?: number;
   url?: string;
   localAddress?: string;
+  /**
+   * Keep the discovered gateway between calls. A request to it that fails
+   * with anything but a UPnP fault drops it, finds the router again, and sends
+   * the request once more if the router now answers at a different location.
+   */
   cacheGateway?: boolean;
 }
 

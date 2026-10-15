@@ -666,4 +666,49 @@ setupTest("NAT-UPNP/Client", (opts) => {
       }
     });
   }
+
+  if (disposableGateway) {
+    // test/igd2's gateway restarts miniupnpd on its other HTTP port when its
+    // control port is connected to, and answers with the new description URL.
+    function moveGateway(host: string): Promise<string> {
+      return new Promise((resolve, reject) => {
+        let answer = "";
+        const socket = net.connect(5999, host);
+        socket.setEncoding("utf8");
+        socket.on("data", (chunk) => { answer += chunk; });
+        socket.on("end", () => {
+          const url = answer.trim();
+          if (url.startsWith("http://")) resolve(url);
+          else reject(new Error(`gateway did not move: ${JSON.stringify(answer)}`));
+        });
+        socket.on("error", reject);
+      });
+    }
+
+    opts.run("A cached gateway that restarts on a new port is found there, and maps there", async () => {
+      const caching = new Client({ cacheGateway: true });
+      const port = globalPort[4];
+      const first = (await caching.getGateway()).gateway.description;
+      const host = new URL(first).hostname;
+      let moved: string | null = null;
+      try {
+        moved = await moveGateway(host);
+        console.log("  Gateway moved:", first, "->", moved);
+
+        const ip = await caching.getPublicIp();
+        const found = (await caching.getGateway()).gateway.description;
+        console.log("  Found again at:", found, "public IP:", ip);
+
+        await caching.createMapping({ public: port, private: port, ttl: 0, description: "nat-upnp moved gateway" });
+        const held = await caching.getMapping({ public: port });
+        await caching.removeMapping({ public: port });
+
+        return found === moved && found !== first && !!ip && held !== null && held.local === true;
+      } finally {
+        // Back where it started, for every test after this one.
+        if (moved) await moveGateway(host);
+        caching.close();
+      }
+    });
+  }
 });

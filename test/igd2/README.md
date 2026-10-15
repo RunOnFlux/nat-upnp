@@ -43,6 +43,10 @@ Two containers on two user-defined bridges:
 The gateway rewrites nftables rules **inside its own network namespace**, never the host's. SSDP
 multicast crosses the Docker bridge, so discovery is exercised for real rather than bypassed.
 
+A connection to the gateway's control port, 5999, restarts miniupnpd on its other HTTP port (5000
+and 5001 in turn) and answers with the new description URL, as a router whose UPnP service
+restarts does. The suite moves it and moves it back.
+
 ## Two things worth knowing before changing it
 
 **The WAN leg is in RFC 5737 documentation space, and miniupnpd refuses to forward for one.**

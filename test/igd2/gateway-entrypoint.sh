@@ -6,6 +6,9 @@
 
 HTTP_PORT=${HTTP_PORT:-5000}
 FORCE_IGD_V1=${FORCE_IGD_V1:-no}
+# A connection to this port restarts miniupnpd on its other HTTP port, as a
+# router whose UPnP service restarts does (see gateway-move.sh).
+CONTROL_PORT=${CONTROL_PORT:-5999}
 
 # The names are what the suite prints back, so they should say which mode the
 # same binary is running in.
@@ -77,4 +80,7 @@ echo "  WAN $WAN_IF $WAN_IP"
 
 echo "== description URL: http://$LAN_IP:$HTTP_PORT/rootDesc.xml =="
 
-exec miniupnpd -d -f /etc/miniupnpd/miniupnpd.conf
+miniupnpd -d -f /etc/miniupnpd/miniupnpd.conf &
+
+exec socat TCP-LISTEN:"$CONTROL_PORT",bind="$LAN_IP",reuseaddr,fork \
+  EXEC:"/usr/local/bin/gateway-move.sh $LAN_IP $HTTP_PORT"

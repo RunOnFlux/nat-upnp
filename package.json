@@ -16,7 +16,7 @@
   "license": "BlueOak-1.0.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/RunOnFlux/nat-upnp.git"
+    "url": "git+https://github.com/RunOnFlux/nat-upnp.git"
   },
   "scripts": {
     "build": "tsc",

@@ -10,11 +10,13 @@ RUN apt-get update \
       nftables \
       iproute2 \
       uuid-runtime \
+      socat \
  && rm -rf /var/lib/apt/lists/*
 
 COPY gateway-entrypoint.sh /usr/local/bin/gateway-entrypoint.sh
-RUN chmod +x /usr/local/bin/gateway-entrypoint.sh
+COPY gateway-move.sh /usr/local/bin/gateway-move.sh
+RUN chmod +x /usr/local/bin/gateway-entrypoint.sh /usr/local/bin/gateway-move.sh
 
-EXPOSE 5000/tcp 1900/udp
+EXPOSE 5000/tcp 5001/tcp 5999/tcp 1900/udp
 
 ENTRYPOINT ["/usr/local/bin/gateway-entrypoint.sh"]

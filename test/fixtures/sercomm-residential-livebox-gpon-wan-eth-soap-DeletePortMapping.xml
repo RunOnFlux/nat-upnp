@@ -1,0 +1,3 @@
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body>
+<u:DeletePortMappingResponse xmlns:u="urn:schemas-upnp-org:service:WANIPConnection:2"></u:DeletePortMappingResponse>
+</s:Body> </s:Envelope>

@@ -1,0 +1,14 @@
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+  <s:Body>
+    <u:GetGenericPortMappingEntryResponse xmlns:u="urn:schemas-upnp-org:service:WANIPConnection:1">
+      <NewRemoteHost></NewRemoteHost>
+      <NewExternalPort>0</NewExternalPort>
+      <NewProtocol>TCP</NewProtocol>
+      <NewInternalPort>0</NewInternalPort>
+      <NewInternalClient>0.0.0.0</NewInternalClient>
+      <NewEnabled>0</NewEnabled>
+      <NewPortMappingDescription>Dummy inactive rule for windows to work</NewPortMappingDescription>
+      <NewLeaseDuration>0</NewLeaseDuration>
+    </u:GetGenericPortMappingEntryResponse>
+  </s:Body>
+</s:Envelope>

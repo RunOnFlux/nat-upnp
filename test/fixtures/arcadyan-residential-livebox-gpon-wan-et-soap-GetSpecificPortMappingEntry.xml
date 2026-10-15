@@ -1,0 +1,9 @@
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body>
+<u:GetSpecificPortMappingEntryResponse xmlns:u="urn:schemas-upnp-org:service:WANIPConnection:2">
+<NewInternalPort>32400</NewInternalPort>
+<NewInternalClient>192.168.1.77</NewInternalClient>
+<NewEnabled>1</NewEnabled>
+<NewPortMappingDescription>[redacted]</NewPortMappingDescription>
+<NewLeaseDuration>0</NewLeaseDuration>
+</u:GetSpecificPortMappingEntryResponse>
+</s:Body> </s:Envelope>

@@ -1,0 +1,79 @@
+<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+<s:Body>
+<u:GetListOfPortMappingsResponse xmlns:u="urn:schemas-upnp-org:service:WANIPConnection:2">
+<NewPortListing>&lt;p:PortMappingList xmlns:p=&quot;urn:schemas-upnp-org:gw:WANIPConnection&quot; xmlns:xsi=&quot;http://www.w3.org/2001/XMLSchema-instance&quot; xsi:schemaLocation=&quot;urn:schemas-upnp-org:gw:WANIPConnection http://www.upnp.org/schemas/gw/WANIPConnection-v2.xsd&quot;&gt;
+	&lt;p:PortMappingEntry&gt;
+		&lt;p:NewRemoteHost&gt;&lt;/p:NewRemoteHost&gt;
+		&lt;p:NewExternalPort&gt;16172&lt;/p:NewExternalPort&gt;
+		&lt;p:NewProtocol&gt;TCP&lt;/p:NewProtocol&gt;
+		&lt;p:NewInternalPort&gt;16172&lt;/p:NewInternalPort&gt;
+		&lt;p:NewInternalClient&gt;192.168.40.76&lt;/p:NewInternalClient&gt;
+		&lt;p:NewEnabled&gt;1&lt;/p:NewEnabled&gt;
+		&lt;p:NewDescription&gt;FluxOS.Reserved&lt;/p:NewDescription&gt;
+		&lt;p:NewLeaseTime&gt;0&lt;/p:NewLeaseTime&gt;
+	&lt;/p:PortMappingEntry&gt;
+	&lt;p:PortMappingEntry&gt;
+		&lt;p:NewRemoteHost&gt;&lt;/p:NewRemoteHost&gt;
+		&lt;p:NewExternalPort&gt;16176&lt;/p:NewExternalPort&gt;
+		&lt;p:NewProtocol&gt;TCP&lt;/p:NewProtocol&gt;
+		&lt;p:NewInternalPort&gt;16176&lt;/p:NewInternalPort&gt;
+		&lt;p:NewInternalClient&gt;192.168.40.76&lt;/p:NewInternalClient&gt;
+		&lt;p:NewEnabled&gt;1&lt;/p:NewEnabled&gt;
+		&lt;p:NewDescription&gt;Flux.Home.UI&lt;/p:NewDescription&gt;
+		&lt;p:NewLeaseTime&gt;184549375&lt;/p:NewLeaseTime&gt;
+	&lt;/p:PortMappingEntry&gt;
+	&lt;p:PortMappingEntry&gt;
+		&lt;p:NewRemoteHost&gt;&lt;/p:NewRemoteHost&gt;
+		&lt;p:NewExternalPort&gt;16177&lt;/p:NewExternalPort&gt;
+		&lt;p:NewProtocol&gt;TCP&lt;/p:NewProtocol&gt;
+		&lt;p:NewInternalPort&gt;16177&lt;/p:NewInternalPort&gt;
+		&lt;p:NewInternalClient&gt;192.168.40.76&lt;/p:NewInternalClient&gt;
+		&lt;p:NewEnabled&gt;1&lt;/p:NewEnabled&gt;
+		&lt;p:NewDescription&gt;Flux.Backend.API&lt;/p:NewDescription&gt;
+		&lt;p:NewLeaseTime&gt;184549375&lt;/p:NewLeaseTime&gt;
+	&lt;/p:PortMappingEntry&gt;
+	&lt;p:PortMappingEntry&gt;
+		&lt;p:NewRemoteHost&gt;&lt;/p:NewRemoteHost&gt;
+		&lt;p:NewExternalPort&gt;16178&lt;/p:NewExternalPort&gt;
+		&lt;p:NewProtocol&gt;TCP&lt;/p:NewProtocol&gt;
+		&lt;p:NewInternalPort&gt;16178&lt;/p:NewInternalPort&gt;
+		&lt;p:NewInternalClient&gt;192.168.40.76&lt;/p:NewInternalClient&gt;
+		&lt;p:NewEnabled&gt;1&lt;/p:NewEnabled&gt;
+		&lt;p:NewDescription&gt;Flux.Backend.API.SSL&lt;/p:NewDescription&gt;
+		&lt;p:NewLeaseTime&gt;184549375&lt;/p:NewLeaseTime&gt;
+	&lt;/p:PortMappingEntry&gt;
+	&lt;p:PortMappingEntry&gt;
+		&lt;p:NewRemoteHost&gt;&lt;/p:NewRemoteHost&gt;
+		&lt;p:NewExternalPort&gt;16179&lt;/p:NewExternalPort&gt;
+		&lt;p:NewProtocol&gt;TCP&lt;/p:NewProtocol&gt;
+		&lt;p:NewInternalPort&gt;16179&lt;/p:NewInternalPort&gt;
+		&lt;p:NewInternalClient&gt;192.168.40.76&lt;/p:NewInternalClient&gt;
+		&lt;p:NewEnabled&gt;1&lt;/p:NewEnabled&gt;
+		&lt;p:NewDescription&gt;Flux.Syncthing&lt;/p:NewDescription&gt;
+		&lt;p:NewLeaseTime&gt;184549375&lt;/p:NewLeaseTime&gt;
+	&lt;/p:PortMappingEntry&gt;
+	&lt;p:PortMappingEntry&gt;
+		&lt;p:NewRemoteHost&gt;&lt;/p:NewRemoteHost&gt;
+		&lt;p:NewExternalPort&gt;36666&lt;/p:NewExternalPort&gt;
+		&lt;p:NewProtocol&gt;TCP&lt;/p:NewProtocol&gt;
+		&lt;p:NewInternalPort&gt;36666&lt;/p:NewInternalPort&gt;
+		&lt;p:NewInternalClient&gt;192.168.40.76&lt;/p:NewInternalClient&gt;
+		&lt;p:NewEnabled&gt;1&lt;/p:NewEnabled&gt;
+		&lt;p:NewDescription&gt;Flux.App.FoldingAtRunOnFlux29&lt;/p:NewDescription&gt;
+		&lt;p:NewLeaseTime&gt;184549375&lt;/p:NewLeaseTime&gt;
+	&lt;/p:PortMappingEntry&gt;
+	&lt;p:PortMappingEntry&gt;
+		&lt;p:NewRemoteHost&gt;&lt;/p:NewRemoteHost&gt;
+		&lt;p:NewExternalPort&gt;5223&lt;/p:NewExternalPort&gt;
+		&lt;p:NewProtocol&gt;TCP&lt;/p:NewProtocol&gt;
+		&lt;p:NewInternalPort&gt;5223&lt;/p:NewInternalPort&gt;
+		&lt;p:NewInternalClient&gt;192.168.40.76&lt;/p:NewInternalClient&gt;
+		&lt;p:NewEnabled&gt;1&lt;/p:NewEnabled&gt;
+		&lt;p:NewDescription&gt;Flux.App.simplexsmp9&lt;/p:NewDescription&gt;
+		&lt;p:NewLeaseTime&gt;184549375&lt;/p:NewLeaseTime&gt;
+	&lt;/p:PortMappingEntry&gt;
+&lt;/p:PortMappingList&gt;</NewPortListing>
+</u:GetListOfPortMappingsResponse>
+</s:Body>
+</s:Envelope>

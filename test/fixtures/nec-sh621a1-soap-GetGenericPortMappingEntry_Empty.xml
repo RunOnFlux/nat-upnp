@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" SOAP-ENV:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+	<SOAP-ENV:Body>
+		<SOAP-ENV:Fault>
+			<faultcode>SOAP-ENV:Client</faultcode>
+			<faultstring>UPnPError</faultstring>
+			<detail>
+				<UPnPError xmlns="urn:schemas-upnp-org:control-1-0">
+					<errorCode xmlns="">713</errorCode>
+					<errorDescription xmlns="">SpecifiedArrayIndexInvalid</errorDescription>
+				</UPnPError>
+			</detail>
+		</SOAP-ENV:Fault>
+	</SOAP-ENV:Body>
+</SOAP-ENV:Envelope>

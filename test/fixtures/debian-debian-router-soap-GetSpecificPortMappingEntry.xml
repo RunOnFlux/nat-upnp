@@ -1,0 +1,2 @@
+<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body><u:GetSpecificPortMappingEntryResponse xmlns:u="urn:schemas-upnp-org:service:WANIPConnection:2"><NewInternalPort>36666</NewInternalPort><NewInternalClient>192.168.1.220</NewInternalClient><NewEnabled>1</NewEnabled><NewPortMappingDescription>Flux_App_FoldingAtRunOnFlux19</NewPortMappingDescription><NewLeaseDuration>604708</NewLeaseDuration></u:GetSpecificPortMappingEntryResponse></s:Body></s:Envelope>

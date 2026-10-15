@@ -1,0 +1,70 @@
+<?xml version="1.0"?>
+<root xmlns="urn:schemas-upnp-org:device-1-0">
+<specVersion>
+<major>1</major>
+<minor>0</minor>
+</specVersion>
+<device>
+<deviceType>urn:schemas-upnp-org:device:InternetGatewayDevice:1</deviceType>
+<friendlyName>Aterm Series</friendlyName>
+<manufacturer>NEC Corporation/NEC Platforms, Ltd.</manufacturer>
+<modelDescription>Broadband Router and Wireless Access Point</modelDescription>
+<modelName>Aterm Series</modelName>
+<modelNumber></modelNumber>
+<serialNumber>SERIAL0001</serialNumber>
+<UDN>uuid:c024801e-0000-4000-8000-c02480000000</UDN>
+<serviceList>
+<service>
+<serviceType>urn:schemas-upnp-org:service:Layer3Forwarding:1</serviceType>
+<serviceId>urn:upnp-org:serviceId:L3Frwd1</serviceId>
+<controlURL>/upnp/control/27039120</controlURL>
+<eventSubURL>/upnp/event/9c4ca620</eventSubURL>
+<SCPDURL>/upnp/ff6bcb20.xml</SCPDURL>
+</service>
+</serviceList>
+<deviceList>
+<device>
+<deviceType>urn:schemas-upnp-org:device:WANDevice:1</deviceType>
+<friendlyName>Aterm Series</friendlyName>
+<manufacturer>NEC Corporation/NEC Platforms, Ltd.</manufacturer>
+<modelDescription>Broadband Router and Wireless Access Point</modelDescription>
+<modelName>Aterm Series</modelName>
+<modelNumber></modelNumber>
+<serialNumber>SERIAL0001</serialNumber>
+<UDN>uuid:31825323-0000-4000-8000-318253000000</UDN>
+<serviceList>
+<service>
+<serviceType>urn:schemas-upnp-org:service:WANCommonInterfaceConfig:1</serviceType>
+<serviceId>urn:upnp-org:serviceId:WANCommonIFC1</serviceId>
+<controlURL>/upnp/control/27039140</controlURL>
+<eventSubURL>/upnp/event/9c4ca640</eventSubURL>
+<SCPDURL>/upnp/ff6bcb40.xml</SCPDURL>
+</service>
+</serviceList>
+<deviceList>
+<device>
+<deviceType>urn:schemas-upnp-org:device:WANConnectionDevice:1</deviceType>
+<friendlyName>Aterm Series</friendlyName>
+<manufacturer>NEC Corporation/NEC Platforms, Ltd.</manufacturer>
+<modelDescription>Broadband Router and Wireless Access Point</modelDescription>
+<modelName>Aterm Series</modelName>
+<modelNumber></modelNumber>
+<serialNumber>SERIAL0001</serialNumber>
+<UDN>uuid:d72768be-0000-4000-8000-d72768000000</UDN>
+<serviceList>
+<service>
+<serviceType>urn:schemas-upnp-org:service:WANPPPConnection:1</serviceType>
+<serviceId>urn:upnp-org:serviceId:WANPPPConn1</serviceId>
+<controlURL>/upnp/control/27039170</controlURL>
+<eventSubURL>/upnp/event/9c4ca670</eventSubURL>
+<SCPDURL>/upnp/ff6bcb70.xml</SCPDURL>
+</service>
+</serviceList>
+</device>
+</deviceList>
+</device>
+</deviceList>
+<presentationURL>http://192.168.10.1/</presentationURL>
+</device>
+</root>
+

@@ -1,0 +1,91 @@
+<?xml version="1.0"?>
+<root xmlns="urn:schemas-upnp-org:device-1-0">
+  <specVersion>
+    <major>1</major>
+    <minor>0</minor>
+  </specVersion>
+  <device>
+    <pnpx:X_hardwareId xmlns:pnpx="http://schemas.microsoft.com/windows/pnpx/2005/11">VEN_0129&amp;DEV_0000&amp;SUBSYS_03&amp;REV_250417</pnpx:X_hardwareId>
+    <pnpx:X_compatibleId xmlns:pnpx="http://schemas.microsoft.com/windows/pnpx/2005/11">GenericUmPass</pnpx:X_compatibleId>
+    <pnpx:X_deviceCategory xmlns:pnpx="http://schemas.microsoft.com/windows/pnpx/2005/11">NetworkInfrastructure.Gateway</pnpx:X_deviceCategory>
+    <df:X_deviceCategory xmlns:df="http://schemas.microsoft.com/windows/2008/09/devicefoundation">Network.Gateway</df:X_deviceCategory>
+    <deviceType>urn:schemas-upnp-org:device:InternetGatewayDevice:2</deviceType>
+    <friendlyName>Orange Livebox</friendlyName>
+    <manufacturer>Arcadyan</manufacturer>
+    <manufacturerURL>https://www.arcadyan.com</manufacturerURL>
+    <modelName>Residential Livebox (GPON, WAN Ethernet)</modelName>
+    <UDN>uuid:d151a194-0000-4000-8000-d151a1000000</UDN>
+    <modelDescription>Arcadyan,fr,ARNA-fr-G01.R09.C01_08</modelDescription>
+    <modelNumber>4+</modelNumber>
+    <serialNumber>SERIAL0001</serialNumber>
+    <presentationURL>http://192.168.1.1</presentationURL>
+    <UPC></UPC>
+
+    <iconList>
+      <icon>
+        <mimetype>image/png</mimetype>
+        <width>16</width>
+        <height>16</height>
+        <depth>8</depth>
+        <url>/2210321d/ligd.png</url>
+      </icon>
+    </iconList> 
+    <deviceList>
+      <device>
+        <deviceType>urn:schemas-upnp-org:device:WANDevice:2</deviceType>
+        <friendlyName>Orange Livebox</friendlyName>
+        <manufacturer>Arcadyan</manufacturer>
+        <manufacturerURL>https://www.arcadyan.com</manufacturerURL>
+        <modelDescription>Arcadyan,fr,ARNA-fr-G01.R09.C01_08</modelDescription>
+        <modelName>Residential Livebox (GPON, WAN Ethernet)</modelName>
+        <modelNumber>4+</modelNumber>
+        <modelURL>https://www.arcadyan.com</modelURL>
+        <serialNumber>SERIAL0001</serialNumber>
+        <presentationURL>http://192.168.1.1</presentationURL>
+        <UDN>uuid:dfc0d1d6-0000-4000-8000-dfc0d1000000</UDN>
+        <UPC></UPC>
+        <serviceList>
+          <service>
+            <serviceType>urn:schemas-upnp-org:service:WANCommonInterfaceConfig:1</serviceType>
+            <serviceId>urn:upnp-org:serviceId:WANCommonIFC1</serviceId>
+            <controlURL>/2210321d/upnp/control/WANCommonIFC1</controlURL>
+            <eventSubURL>/2210321d/upnp/control/WANCommonIFC1</eventSubURL>
+            <SCPDURL>/2210321d/gateicfgSCPD.xml</SCPDURL>
+          </service>
+        </serviceList>
+        <deviceList>
+          <device>
+            <deviceType>urn:schemas-upnp-org:device:WANConnectionDevice:2</deviceType>
+            <friendlyName>Orange Livebox</friendlyName>
+            <manufacturer>Arcadyan</manufacturer>
+            <manufacturerURL>https://www.arcadyan.com</manufacturerURL>
+            <modelDescription>Arcadyan,fr,ARNA-fr-G01.R09.C01_08</modelDescription>
+            <modelName>Residential Livebox (GPON, WAN Ethernet)</modelName>
+            <modelNumber>4+</modelNumber>
+            <modelURL>https://www.arcadyan.com</modelURL>
+            <serialNumber>SERIAL0001</serialNumber>
+            <presentationURL>http://192.168.1.1</presentationURL>
+            <UDN>uuid:6eec54ae-0000-4000-8000-6eec54000000</UDN>
+            <UPC></UPC>
+            <serviceList>
+              <service>
+                <serviceType>urn:schemas-upnp-org:service:WANIPConnection:2</serviceType>
+                <serviceId>urn:upnp-org:serviceId:WANIPConn1</serviceId>
+                <controlURL>/2210321d/upnp/control/WANIPConn1</controlURL>
+                <eventSubURL>/2210321d/upnp/control/WANIPConn1</eventSubURL>
+                <SCPDURL>/2210321d/gateconnSCPD_IP.xml</SCPDURL>
+              </service>
+             <service>
+                <serviceType>urn:schemas-upnp-org:service:WANIPv6FirewallControl:1</serviceType>
+                <serviceId>urn:upnp-org:serviceId:WANIPv6FwCtrl1</serviceId>
+                <controlURL>/2210321d/upnp/control/WANIPv6FwCtrl1</controlURL>
+                <eventSubURL>/2210321d/upnp/control/WANIPv6FwCtrl1</eventSubURL>
+                <SCPDURL>/2210321d/wanipv6fwctrlSCPD.xml</SCPDURL>
+              </service>
+            </serviceList>
+          </device>
+        </deviceList>
+      </device>
+    </deviceList>
+  </device>
+</root>

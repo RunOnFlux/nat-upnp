@@ -1,0 +1,9 @@
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body>
+<u:GetSpecificPortMappingEntryResponse xmlns:u="urn:schemas-upnp-org:service:WANIPConnection:1">
+<NewInternalPort>59988</NewInternalPort>
+<NewInternalClient>192.168.1.74</NewInternalClient>
+<NewEnabled>1</NewEnabled>
+<NewPortMappingDescription>Fixture</NewPortMappingDescription>
+<NewLeaseDuration>900</NewLeaseDuration>
+</u:GetSpecificPortMappingEntryResponse>
+</s:Body> </s:Envelope>

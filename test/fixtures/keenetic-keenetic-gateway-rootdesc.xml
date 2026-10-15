@@ -1,0 +1,77 @@
+<?xml version="1.0"?>
+<root xmlns="urn:schemas-upnp-org:device-1-0" configId="1337">
+<specVersion>
+<major>1</major>
+<minor>1</minor>
+</specVersion>
+<device>
+<deviceType>urn:schemas-upnp-org:device:InternetGatewayDevice:1</deviceType>
+<friendlyName>Keenetic Gateway</friendlyName>
+<manufacturer>Keenetic Ltd.</manufacturer>
+<manufacturerURL>https://www.keenetic.com</manufacturerURL>
+<modelDescription>Keenetic Gateway</modelDescription>
+<modelName>Keenetic Gateway</modelName>
+<modelNumber>KN-1912</modelNumber>
+<modelURL>https://www.keenetic.com</modelURL>
+<serialNumber>SERIAL0001</serialNumber>
+<UDN>uuid:5a25f247-0000-4000-8000-5a25f2000000</UDN>
+<serviceList>
+<service>
+<serviceType>urn:schemas-upnp-org:service:Layer3Forwarding:1</serviceType>
+<serviceId>urn:upnp-org:serviceId:L3Forwarding1</serviceId>
+<SCPDURL>/L3F.xml</SCPDURL>
+<controlURL>/ctl/L3F</controlURL>
+<eventSubURL>/evt/L3F</eventSubURL>
+</service>
+</serviceList>
+<deviceList>
+<device>
+<deviceType>urn:schemas-upnp-org:device:WANDevice:1</deviceType>
+<friendlyName>WANDevice</friendlyName>
+<manufacturer>Keenetic Ltd.</manufacturer>
+<manufacturerURL>https://www.keenetic.com</manufacturerURL>
+<modelDescription>WAN Device</modelDescription>
+<modelName>WAN Device</modelName>
+<modelNumber>Keenetic Gateway</modelNumber>
+<modelURL>https://www.keenetic.com</modelURL>
+<serialNumber>SERIAL0001</serialNumber>
+<UDN>uuid:17ac03f6-0000-4000-8000-17ac03000000</UDN>
+<UPC>000000000000</UPC>
+<serviceList>
+<service>
+<serviceType>urn:schemas-upnp-org:service:WANCommonInterfaceConfig:1</serviceType>
+<serviceId>urn:upnp-org:serviceId:WANCommonIFC1</serviceId>
+<SCPDURL>/WANCfg.xml</SCPDURL>
+<controlURL>/ctl/CmnIfCfg</controlURL>
+<eventSubURL>/evt/CmnIfCfg</eventSubURL>
+</service>
+</serviceList>
+<deviceList>
+<device>
+<deviceType>urn:schemas-upnp-org:device:WANConnectionDevice:1</deviceType>
+<friendlyName>WANConnectionDevice</friendlyName>
+<manufacturer>Keenetic Ltd.</manufacturer>
+<manufacturerURL>https://www.keenetic.com</manufacturerURL>
+<modelDescription>Keenetic Gateway</modelDescription>
+<modelName>Keenetic Gateway</modelName>
+<modelNumber>Keenetic Gateway</modelNumber>
+<modelURL>https://www.keenetic.com</modelURL>
+<serialNumber>SERIAL0001</serialNumber>
+<UDN>uuid:cfd3acdc-0000-4000-8000-cfd3ac000000</UDN>
+<UPC>000000000000</UPC>
+<serviceList>
+<service>
+<serviceType>urn:schemas-upnp-org:service:WANIPConnection:1</serviceType>
+<serviceId>urn:upnp-org:serviceId:WANIPConn1</serviceId>
+<SCPDURL>/WANIPCn.xml</SCPDURL>
+<controlURL>/ctl/IPConn</controlURL>
+<eventSubURL>/evt/IPConn</eventSubURL>
+</service>
+</serviceList>
+</device>
+</deviceList>
+</device>
+</deviceList>
+<presentationURL>http://192.168.1.1/</presentationURL>
+</device>
+</root>

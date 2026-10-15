@@ -1,0 +1,70 @@
+<?xml version="1.0"?>
+<root xmlns="urn:schemas-upnp-org:device-1-0">
+  <specVersion>
+    <major>1</major>
+    <minor>0</minor>
+  </specVersion>
+  <device>
+    <deviceType>urn:schemas-upnp-org:device:InternetGatewayDevice:2</deviceType>
+    <friendlyName>Fast5670 DT</friendlyName>
+    <manufacturer>Sagemcom</manufacturer>
+    <manufacturerURL>http://www.sagemcom.com/</manufacturerURL>
+    <modelDescription>Fast5670 DT</modelDescription>
+    <modelName>Fast5670 DT</modelName>
+    <modelNumber></modelNumber>
+    <serialNumber>SERIAL0001</serialNumber>
+    <presentationURL>http://home</presentationURL>
+    <UDN>uuid:10fca6bb-0000-4000-8000-10fca6000000</UDN>
+    <UPC>999999000000</UPC>
+    <deviceList>
+      <device>
+        <deviceType>urn:schemas-upnp-org:device:WANDevice:2</deviceType>
+        <friendlyName>Sagemcom BCM68360</friendlyName>
+        <manufacturer>Sagemcom</manufacturer>
+        <manufacturerURL>http://www.sagemcom.com</manufacturerURL>
+        <modelDescription>Sagemcom BCM68360</modelDescription>
+        <modelName>Sagemcom BCM68360</modelName>
+        <modelNumber>Sagemcom BCM68360</modelNumber>
+        <modelURL>Sagemcom BCM68360</modelURL>
+        <serialNumber>SERIAL0001</serialNumber>
+        <presentationURL>http://home</presentationURL>
+        <UDN>uuid:8edb3f75-0000-4000-8000-8edb3f000000</UDN>
+        <UPC>999999000000</UPC>
+        <serviceList>
+          <service>
+            <serviceType>urn:schemas-upnp-org:service:WANCommonInterfaceConfig:1</serviceType>
+            <serviceId>urn:upnp-org:serviceId:WANCommonIFC1</serviceId>
+            <controlURL>/upnp/control/WANCommonIFC1</controlURL>
+            <eventSubURL>/upnp/control/WANCommonIFC1</eventSubURL>
+            <SCPDURL>/34363463/wancomicfgSCPD.xml</SCPDURL>
+          </service>
+        </serviceList>
+        <deviceList>
+          <device>
+            <deviceType>urn:schemas-upnp-org:device:WANConnectionDevice:2</deviceType>
+            <friendlyName>Sagemcom BCM68360</friendlyName>
+            <manufacturer>Sagemcom</manufacturer>
+            <manufacturerURL>http://www.sagemcom.com</manufacturerURL>
+            <modelDescription>Sagemcom BCM68360</modelDescription>
+            <modelName>Sagemcom BCM68360</modelName>
+            <modelNumber>Sagemcom BCM68360</modelNumber>
+            <modelURL>http://sagemcom.home</modelURL>
+            <serialNumber>SERIAL0001</serialNumber>
+            <presentationURL>http://192.168.1.1</presentationURL>
+            <UDN>uuid:382349c0-0000-4000-8000-382349000000</UDN>
+            <UPC>999999000000</UPC>
+            <serviceList>
+              <service>
+                <serviceType>urn:schemas-upnp-org:service:WANPPPConnection:1</serviceType>
+                <serviceId>urn:upnp-org:serviceId:WANPPPConn1</serviceId>
+                <controlURL>/upnp/control/WANPPPConn1</controlURL>
+                <eventSubURL>/upnp/control/WANPPPConn1</eventSubURL>
+                <SCPDURL>/34363463/wanpppconnSCPD.xml</SCPDURL>
+              </service>
+            </serviceList>
+          </device>
+        </deviceList>
+      </device>
+    </deviceList>
+  </device>
+</root>

@@ -1,0 +1,77 @@
+<?xml version="1.0"?>
+<root xmlns="urn:schemas-upnp-org:device-1-0">
+<specVersion>
+<major>1</major>
+<minor>0</minor>
+</specVersion>
+<URLBase></URLBase>
+<device>
+<deviceType>urn:schemas-upnp-org:device:InternetGatewayDevice:1</deviceType>
+<presentationURL>http://192.168.5.1:80       </presentationURL>
+<friendlyName               >TP-Link SMB ER605</friendlyName>
+<manufacturer                         >TP-Link</manufacturer>
+<manufacturerURL          >http://www.tp-link.com</manufacturerURL>
+<modelDescription              >TP-Link ER605 2.20</modelDescription>
+<modelName                           >ER605</modelName>
+<modelNumber                            >2.20</modelNumber>
+<UDN>uuid:upnp8118ae4d-0000-4000-8000-8118ae000000</UDN>
+<UPC>123456000000</UPC>
+<serviceList>
+<service>
+<serviceType>urn:schemas-upnp-org:service:Layer3Forwarding:1</serviceType>
+<serviceId>urn:upnp-org:serviceId:L3Forwarding1</serviceId>
+<controlURL>/l3f1514793668213989</controlURL>
+<eventSubURL>/l3f1514793668213989</eventSubURL>
+<SCPDURL>/l3f1514793668213989.xml</SCPDURL>
+</service>
+</serviceList>
+<deviceList>
+<device>
+<deviceType>urn:schemas-upnp-org:device:WANDevice:1</deviceType>
+<friendlyName>WAN Device</friendlyName>
+<manufacturer                         >TP-Link</manufacturer>
+<manufacturerURL          >http://www.tp-link.com</manufacturerURL>
+<modelDescription>WAN Device</modelDescription>
+<modelName>WAN Device</modelName>
+<modelNumber>1</modelNumber>
+<modelURL></modelURL>
+<serialNumber>SERIAL0001</serialNumber>
+<UDN>uuid:upnp476b7996-0000-4000-8000-476b79000000</UDN>
+<UPC>123456000000</UPC>
+<serviceList>
+<service>
+<serviceType>urn:schemas-upnp-org:service:WANCommonInterfaceConfig:1</serviceType>
+<serviceId>urn:upnp-org:serviceId:WANCommonInterfaceConfig</serviceId>
+<controlURL>/ifc1514793668213989</controlURL>
+<eventSubURL>/ifc1514793668213989</eventSubURL>
+<SCPDURL>/ifc1514793668213989.xml</SCPDURL>
+</service>
+</serviceList>
+<deviceList>
+<device>
+<deviceType>urn:schemas-upnp-org:device:WANConnectionDevice:1</deviceType>
+<friendlyName>WAN Connection Device</friendlyName>
+<manufacturer                         >TP-Link</manufacturer>
+<manufacturerURL          >http://www.tp-link.com</manufacturerURL>
+<modelDescription>WAN Connection Device</modelDescription>
+<modelName>WAN Connection Device</modelName>
+<modelNumber>1</modelNumber>
+<modelURL></modelURL>
+<serialNumber>SERIAL0001</serialNumber>
+<UDN>uuid:upnp7f91885f-0000-4000-8000-7f9188000000</UDN>
+<UPC>123456000000</UPC>
+<serviceList>
+<service>
+<serviceType>urn:schemas-upnp-org:service:WANIPConnection:1</serviceType>
+<serviceId>urn:upnp-org:serviceId:WANIPConnection</serviceId>
+<controlURL>/ipc1514793668213989</controlURL>
+<eventSubURL>/ipc1514793668213989</eventSubURL>
+<SCPDURL>/ipc1514793668213989.xml</SCPDURL>
+</service>
+</serviceList>
+</device>
+</deviceList>
+</device>
+</deviceList>
+</device>
+</root>

@@ -2761,6 +2761,524 @@ function getSoapFaultCode(xml: string): number | null {
   });
 
   // ========================================
+  // A cached gateway that moves
+  // ========================================
+  console.log("\n=== A cached gateway that moves ===\n");
+
+  // A router whose UPnP service restarts answers on a new port. The fake router
+  // is served at whichever origin is live; every other origin refuses the
+  // connection, as a port nothing listens on does.
+  const GATEWAY_SEARCH_TARGET = "urn:schemas-upnp-org:device:InternetGatewayDevice:1";
+  const FIRST_LOCATION = "http://192.0.2.1:5001/rootDesc.xml";
+  const SECOND_LOCATION = "http://192.0.2.1:5002/rootDesc.xml";
+  const FIRST_ORIGIN = new URL(FIRST_LOCATION).origin;
+  const SECOND_ORIGIN = new URL(SECOND_LOCATION).origin;
+
+  interface MovingGateway {
+    client: Client;
+    /** Where SSDP announces the router; null when nothing answers a search. */
+    announce(location: string | null): void;
+    /** The one origin that accepts connections; null when none does. */
+    serve(origin: string | null): void;
+    /** Announce and serve the same new location. */
+    moveTo(location: string): void;
+    /** M-SEARCH queries sent so far. */
+    searches(): number;
+    /** Each SOAP request that reached a live origin, in order. */
+    reached: { origin: string; action: string; body: string }[];
+    /** Each request sent - a GET or a SOAP action - whether or not anything was listening. */
+    sent: { origin: string; action: string }[];
+    /**
+     * Answers requests for `action` in place of the fake router. Return
+     * undefined to let the fake router answer.
+     */
+    intercept(action: string, answer: (origin: string, body: string) => unknown): void;
+  }
+
+  function connectionRefused(url: string): Error {
+    return Object.assign(new Error(`connect ECONNREFUSED ${new URL(url).host}`), {
+      code: "ECONNREFUSED",
+    });
+  }
+
+  function faultResponse(code: number, description: string): unknown {
+    return { response: { data: faultBody(upnpError(String(code), description)), status: 500 } };
+  }
+
+  async function withMovingGateway(
+    fn: (g: MovingGateway) => Promise<void>,
+    options: { cacheGateway?: boolean; url?: string; localAddress?: string } = { cacheGateway: true },
+    router = "debian-debian-router"
+  ): Promise<void> {
+    const fake = installFakeDgram();
+    const restoreRouter = installFakeRouter(router);
+    const fakeGet = axiosModule.get;
+    const fakePost = axiosModule.post;
+    const realSend = FakeSocket.prototype.send;
+    let announced: string | null = FIRST_LOCATION;
+    let served: string | null = FIRST_ORIGIN;
+    const reached: MovingGateway["reached"] = [];
+    const sent: MovingGateway["sent"] = [];
+    const interceptors = new Map<string, (origin: string, body: string) => unknown>();
+
+    FakeSocket.prototype.send = function (this: FakeSocket, ...args: Parameters<FakeSocket["send"]>) {
+      realSend.apply(this, args);
+      const location = announced;
+      if (location) setImmediate(() => this.deliver(ssdpResponse(GATEWAY_SEARCH_TARGET, location)));
+    };
+    const route = (url: string): string => {
+      const { origin } = new URL(url);
+      if (origin !== served) throw connectionRefused(url);
+      return url.replace(origin, new URL(DESCRIPTION_URL).origin);
+    };
+    (axiosModule as any).get = async (url: string, config: unknown) => {
+      sent.push({ origin: new URL(url).origin, action: "GET" });
+      return fakeGet(route(url), config as any);
+    };
+    (axiosModule as any).post = async (url: string, body: string, config: any) => {
+      const soapAction = String(JSON.parse(config.headers.SOAPAction));
+      const action = soapAction.slice(soapAction.indexOf("#") + 1);
+      const origin = new URL(url).origin;
+      sent.push({ origin, action });
+      const target = route(url);
+      reached.push({ origin, action, body });
+      const answer = interceptors.get(action)?.(origin, body);
+      if (answer !== undefined) return answer;
+      return fakePost(target, body, config);
+    };
+
+    const client = new Client({ timeout: 300, ...options });
+    try {
+      await fn({
+        client,
+        announce: (location) => { announced = location; },
+        serve: (origin) => { served = origin; },
+        moveTo: (location) => {
+          announced = location;
+          served = new URL(location).origin;
+        },
+        searches: () => fake.sockets.reduce((n, socket) => n + socket.sent.length, 0),
+        reached,
+        sent,
+        intercept: (action, answer) => { interceptors.set(action, answer); },
+      });
+    } finally {
+      client.close();
+      FakeSocket.prototype.send = realSend;
+      (axiosModule as any).get = fakeGet;
+      (axiosModule as any).post = fakePost;
+      restoreRouter();
+      fake.restore();
+    }
+  }
+
+  await test("a cached gateway that stops answering is found at its new location, and the call answers from there", async () => {
+    await withMovingGateway(async (g) => {
+      await g.client.getPublicIp();
+      g.moveTo(SECOND_LOCATION);
+
+      const ip = await g.client.getPublicIp();
+
+      assertEqual(ip, "203.0.113.16", "the call answers from the new location");
+      assertEqual(g.searches(), 2, "the router is searched for once more");
+      const last = g.reached[g.reached.length - 1];
+      assertEqual(last.origin, SECOND_ORIGIN, "the request is sent again to the new location");
+    });
+  });
+
+  await test("the gateway found again is the one kept", async () => {
+    await withMovingGateway(async (g) => {
+      await g.client.getPublicIp();
+      g.moveTo(SECOND_LOCATION);
+      await g.client.getPublicIp();
+      const searches = g.searches();
+
+      await g.client.getPublicIp();
+
+      assertEqual(g.searches(), searches, "no further search");
+      assertEqual(g.reached[g.reached.length - 1].origin, SECOND_ORIGIN, "the kept gateway is the new one");
+    });
+  });
+
+  await test("a router found again at the same location is not asked twice", async () => {
+    await withMovingGateway(async (g) => {
+      await g.client.getPublicIp();
+      g.serve(null);
+      const before = g.sent.length;
+
+      const err = await expectThrow(() => g.client.getPublicIp(), "a router that answers nowhere");
+
+      assert(/ECONNREFUSED/.test((err as Error).message), `the original failure stands, got: ${(err as Error).message}`);
+      assertEqual(g.sent.length - before, 1, "nothing is sent after the search");
+      assertEqual(g.searches(), 2, "one search made");
+    });
+  });
+
+  await test("each call that finds the router silent searches once more", async () => {
+    await withMovingGateway(async (g) => {
+      await g.client.getPublicIp();
+      g.serve(null);
+      await expectThrow(() => g.client.getPublicIp(), "first silent call");
+      await expectThrow(() => g.client.getPublicIp(), "second silent call");
+      assertEqual(g.searches(), 3, "one search per failing call");
+
+      g.serve(FIRST_ORIGIN);
+      assertEqual(await g.client.getPublicIp(), "203.0.113.16", "the router back where it was answers");
+      assertEqual(g.searches(), 3, "the router found by the last search is the one kept");
+    });
+  });
+
+  await test("a router that cannot be found again leaves the original failure", async () => {
+    await withMovingGateway(async (g) => {
+      await g.client.getPublicIp();
+      g.serve(null);
+      g.announce(null);
+
+      const err = await expectThrow(() => g.client.getPublicIp(), "a router gone altogether");
+
+      assert(/ECONNREFUSED/.test((err as Error).message), `the request's failure, not the search's, got: ${(err as Error).message}`);
+    });
+  });
+
+  await test("a UPnP fault is the router answering, so the gateway is kept", async () => {
+    await withMovingGateway(async (g) => {
+      await g.client.getPublicIp();
+      g.intercept("GetExternalIPAddress", () => { throw faultResponse(501, "ActionFailed"); });
+
+      const err = await expectThrow(() => g.client.getPublicIp(), "a refused request");
+
+      assert(err instanceof UpnpError && err.code === 501, "the fault is the answer");
+      assertEqual(g.searches(), 1, "no search");
+    });
+  });
+
+  await test("an action the router says it lacks does not send the client looking for the router", async () => {
+    // OPNsense's SCPD carries none of the IGD v2 actions.
+    await withMovingGateway(
+      async (g) => {
+        await g.client.getPublicIp();
+
+        const err = await expectThrow(
+          () => g.client.getMappingRange({ startPort: 1, endPort: 65535 }),
+          "an unsupported action"
+        );
+
+        assert(err instanceof UnsupportedActionError, "the router's own answer");
+        assertEqual(g.searches(), 1, "no search");
+        await g.client.getPublicIp();
+        assertEqual(g.searches(), 1, "the gateway is kept for the next call");
+      },
+      { cacheGateway: true },
+      "opnsense"
+    );
+  });
+
+  await test("the caller's abort is the caller's, so the gateway is kept", async () => {
+    await withMovingGateway(async (g) => {
+      await g.client.getPublicIp();
+      const controller = new AbortController();
+      g.intercept("GetExternalIPAddress", () => {
+        controller.abort(new Error("caller gave up"));
+        throw new axiosModule.CanceledError();
+      });
+
+      const err = await expectThrow(() => g.client.getPublicIp({ signal: controller.signal }), "an aborted request");
+
+      assertEqual((err as Error).message, "caller gave up", "the abort's reason");
+      assertEqual(g.searches(), 1, "no search");
+      g.intercept("GetExternalIPAddress", () => undefined);
+      await g.client.getPublicIp();
+      assertEqual(g.searches(), 1, "the gateway is kept for the next call");
+    });
+  });
+
+  await test("an abort while the router is being found again ends the call with the abort", async () => {
+    await withMovingGateway(async (g) => {
+      await g.client.getPublicIp();
+      g.serve(null);
+      g.announce(null);
+      const controller = new AbortController();
+      const realSend = FakeSocket.prototype.send;
+      FakeSocket.prototype.send = function (this: FakeSocket, ...args: Parameters<FakeSocket["send"]>) {
+        realSend.apply(this, args);
+        controller.abort(new Error("out of time"));
+      };
+
+      try {
+        const err = await expectThrow(() => g.client.getPublicIp({ signal: controller.signal }), "aborted search");
+        assertEqual((err as Error).message, "out of time", "the abort's reason, inside the caller's budget");
+      } finally {
+        FakeSocket.prototype.send = realSend;
+      }
+    });
+  });
+
+  await test("without cacheGateway a failed request is not sent again", async () => {
+    await withMovingGateway(
+      async (g) => {
+        g.serve(null);
+        const err = await expectThrow(() => g.client.getPublicIp(), "a request to a dead location");
+        assert(/ECONNREFUSED/.test((err as Error).message), "the failure stands");
+        assertEqual(g.searches(), 1, "the one search every call makes, and no other");
+      },
+      {}
+    );
+  });
+
+  await test("a client given a url never searches", async () => {
+    await withMovingGateway(
+      async (g) => {
+        const gateway = await g.client.getGateway();
+        g.serve(null);
+        const err = await expectThrow(() => g.client.getPublicIp(), "a fixed url that does not answer");
+        assert(/ECONNREFUSED/.test((err as Error).message), "the failure stands");
+        assertEqual(g.searches(), 0, "no search");
+        assert((await g.client.getGateway()) === gateway, "the gateway at the url is kept");
+      },
+      { cacheGateway: true, url: FIRST_LOCATION, localAddress: "192.168.1.50" }
+    );
+  });
+
+  await test("an argument the client refuses sends nothing and searches for nothing", async () => {
+    await withMovingGateway(async (g) => {
+      const err = await expectThrow(() => g.client.createMapping({ public: 70000, ttl: 0 }), "a port out of range");
+      assert(/public port/.test((err as Error).message), `got: ${(err as Error).message}`);
+      assertEqual(g.searches(), 0, "no search");
+      assertEqual(g.reached.length, 0, "no request");
+    });
+  });
+
+  await test("calls that fail together share one search and both answer from the new location", async () => {
+    await withMovingGateway(async (g) => {
+      await g.client.getPublicIp();
+      g.moveTo(SECOND_LOCATION);
+
+      const [a, b] = await Promise.all([g.client.getPublicIp(), g.client.getStatusInfo()]);
+
+      assertEqual(a, "203.0.113.16", "the first call answers");
+      assert(typeof b.connectionStatus === "string", "the second call answers");
+      assertEqual(g.searches(), 2, "one search for both");
+    });
+  });
+
+  await test("a walk that fails part way starts again from the first entry at the new location", async () => {
+    await withMovingGateway(async (g) => {
+      await g.client.getPublicIp();
+      setV1Table([
+        { external: 31000, internal: 31000, host: "192.168.1.50", description: "Flux_App_a", ttl: 0 },
+        { external: 31001, internal: 31001, host: "192.168.1.50", description: "Flux_App_b", ttl: 0 },
+      ]);
+      g.intercept("GetGenericPortMappingEntry", (origin, body) => {
+        if (origin === FIRST_ORIGIN && body.includes("<NewPortMappingIndex>1</NewPortMappingIndex>")) {
+          g.moveTo(SECOND_LOCATION);
+          throw Object.assign(new Error("socket hang up"), { code: "ECONNRESET" });
+        }
+        return undefined;
+      });
+
+      try {
+        const mappings = await g.client.getMappings();
+
+        assertEqual(mappings.map((m) => m.public.port).join(","), "31000,31001", "the whole table, once");
+        const atSecond = g.reached.filter((r) => r.origin === SECOND_ORIGIN && r.action === "GetGenericPortMappingEntry");
+        assert(atSecond[0].body.includes("<NewPortMappingIndex>0</NewPortMappingIndex>"), "the walk starts again at index 0");
+      } finally {
+        setV1Table(null);
+      }
+    });
+  });
+
+  // The request that failed may have landed before the router went quiet.
+  const MAPPED = { public: 36666, private: { host: "192.168.1.220", port: 36666 }, ttl: 0, protocol: "UDP" };
+  const MAPPED_DESCRIPTION = "Flux_App_FoldingAtRunOnFlux19";
+
+  function landsThenDies(g: MovingGateway, action: string): void {
+    g.intercept(action, (origin) => {
+      if (origin !== FIRST_ORIGIN) return undefined;
+      g.moveTo(SECOND_LOCATION);
+      throw Object.assign(new Error("socket hang up"), { code: "ECONNRESET" });
+    });
+  }
+
+  await test("a re-sent mapping the router already holds for this client counts as made", async () => {
+    await withMovingGateway(async (g) => {
+      await g.client.getPublicIp();
+      g.intercept("AddPortMapping", (origin) => {
+        if (origin === FIRST_ORIGIN) {
+          g.moveTo(SECOND_LOCATION);
+          throw Object.assign(new Error("socket hang up"), { code: "ECONNRESET" });
+        }
+        throw faultResponse(718, "ConflictInMappingEntry");
+      });
+
+      const answer = await g.client.createMapping({ ...MAPPED, description: MAPPED_DESCRIPTION });
+
+      assert("GetSpecificPortMappingEntryResponse" in answer, "the lookup that found it is the answer");
+      const lookup = g.reached.find((r) => r.action === "GetSpecificPortMappingEntry");
+      assert(lookup !== undefined && lookup.origin === SECOND_ORIGIN, "the mapping is looked up at the new location");
+      assert(lookup!.body.includes("<NewExternalPort>36666</NewExternalPort>"), "by the port asked for");
+      assert(lookup!.body.includes("<NewProtocol>UDP</NewProtocol>"), "and its protocol");
+    });
+  });
+
+  for (const [what, change] of [
+    ["description", { description: "Flux_App_other" }],
+    ["internal client", { private: { host: "192.168.1.221", port: 36666 } }],
+    ["internal port", { private: { host: "192.168.1.220", port: 36667 } }],
+  ] as const) {
+    await test(`a re-sent mapping refused for one held with another ${what} stays refused`, async () => {
+      await withMovingGateway(async (g) => {
+        await g.client.getPublicIp();
+        g.intercept("AddPortMapping", (origin) => {
+          if (origin === FIRST_ORIGIN) {
+            g.moveTo(SECOND_LOCATION);
+            throw Object.assign(new Error("socket hang up"), { code: "ECONNRESET" });
+          }
+          throw faultResponse(718, "ConflictInMappingEntry");
+        });
+
+        const err = await expectThrow(
+          () => g.client.createMapping({ ...MAPPED, description: MAPPED_DESCRIPTION, ...change }),
+          "a conflict with another mapping"
+        );
+
+        assert(err instanceof UpnpError && err.code === 718, `the 718 stands, got: ${(err as Error).message}`);
+      });
+    });
+  }
+
+  await test("a re-sent mapping refused when the router holds no such entry stays refused", async () => {
+    await withMovingGateway(async (g) => {
+      await g.client.getPublicIp();
+      g.intercept("AddPortMapping", (origin) => {
+        if (origin === FIRST_ORIGIN) {
+          g.moveTo(SECOND_LOCATION);
+          throw Object.assign(new Error("socket hang up"), { code: "ECONNRESET" });
+        }
+        throw faultResponse(718, "ConflictInMappingEntry");
+      });
+      g.intercept("GetSpecificPortMappingEntry", () => { throw faultResponse(714, "NoSuchEntryInArray"); });
+
+      const err = await expectThrow(
+        () => g.client.createMapping({ ...MAPPED, description: MAPPED_DESCRIPTION }),
+        "a conflict with nothing found"
+      );
+
+      assert(err instanceof UpnpError && err.code === 718, "the 718 stands");
+    });
+  });
+
+  await test("a 718 on a first request is not looked into", async () => {
+    await withMovingGateway(async (g) => {
+      g.intercept("AddPortMapping", () => { throw faultResponse(718, "ConflictInMappingEntry"); });
+
+      const err = await expectThrow(
+        () => g.client.createMapping({ ...MAPPED, description: MAPPED_DESCRIPTION }),
+        "a first-request conflict"
+      );
+
+      assert(err instanceof UpnpError && err.code === 718, "the 718 stands");
+      assert(!g.reached.some((r) => r.action === "GetSpecificPortMappingEntry"), "no lookup");
+    });
+  });
+
+  await test("a re-sent removal of a mapping already gone counts as removed", async () => {
+    await withMovingGateway(async (g) => {
+      await g.client.getPublicIp();
+      g.intercept("DeletePortMapping", (origin) => {
+        if (origin === FIRST_ORIGIN) {
+          g.moveTo(SECOND_LOCATION);
+          throw Object.assign(new Error("socket hang up"), { code: "ECONNRESET" });
+        }
+        throw faultResponse(714, "NoSuchEntryInArray");
+      });
+
+      const answer = await g.client.removeMapping({ public: 36666, protocol: "UDP" });
+
+      assertEqual(JSON.stringify(answer), "{}", "an empty answer");
+      assertEqual(g.reached.filter((r) => r.action === "DeletePortMapping").length, 2, "sent at each location");
+    });
+  });
+
+  await test("a 714 on a first removal still throws", async () => {
+    await withMovingGateway(async (g) => {
+      g.intercept("DeletePortMapping", () => { throw faultResponse(714, "NoSuchEntryInArray"); });
+
+      const err = await expectThrow(() => g.client.removeMapping({ public: 36666 }), "a first-request 714");
+
+      assert(err instanceof UpnpError && err.code === 714, "the 714 stands");
+    });
+  });
+
+  for (const code of [730, 714]) {
+    await test(`a re-sent range removal answered ${code} counts as removed`, async () => {
+      await withMovingGateway(async (g) => {
+        await g.client.getPublicIp();
+        g.intercept("DeletePortMappingRange", (origin) => {
+          if (origin === FIRST_ORIGIN) {
+            g.moveTo(SECOND_LOCATION);
+            throw Object.assign(new Error("socket hang up"), { code: "ECONNRESET" });
+          }
+          throw faultResponse(code, "PortMappingNotFound");
+        });
+
+        const answer = await g.client.removeMappingRange({ startPort: 31000, endPort: 31010 });
+
+        assertEqual(JSON.stringify(answer), "{}", "an empty answer");
+      });
+    });
+  }
+
+  await test("a 730 on a first range removal still throws", async () => {
+    await withMovingGateway(async (g) => {
+      g.intercept("DeletePortMappingRange", () => { throw faultResponse(730, "PortMappingNotFound"); });
+
+      const err = await expectThrow(
+        () => g.client.removeMappingRange({ startPort: 31000, endPort: 31010 }),
+        "a first-request 730"
+      );
+
+      assert(err instanceof UpnpError && err.code === 730, "the 730 stands");
+    });
+  });
+
+  await test("a mapping whose port the router picks is never sent twice, but the next call looks again", async () => {
+    await withMovingGateway(async (g) => {
+      await g.client.getPublicIp();
+      landsThenDies(g, "AddAnyPortMapping");
+
+      const err = await expectThrow(() => g.client.createAnyMapping({ public: 7000, ttl: 0 }), "a lost AddAnyPortMapping");
+
+      assert(/socket hang up/.test((err as Error).message), "the failure stands");
+      assertEqual(g.reached.filter((r) => r.action === "AddAnyPortMapping").length, 1, "sent once");
+      const searches = g.searches();
+      await g.client.getPublicIp();
+      assertEqual(g.searches(), searches + 1, "the gateway was dropped");
+      assertEqual(g.reached[g.reached.length - 1].origin, SECOND_ORIGIN, "and found at its new location");
+    });
+  });
+
+  for (const [name, call] of [
+    ["getMapping", (c: Client) => c.getMapping({ public: 36666, protocol: "UDP" })],
+    ["getStatusInfo", (c: Client) => c.getStatusInfo()],
+    ["getMappingRange", (c: Client) => c.getMappingRange({ startPort: 1, endPort: 65535 })],
+    ["createMapping", (c: Client) => c.createMapping({ ...MAPPED, description: MAPPED_DESCRIPTION })],
+    ["removeMapping", (c: Client) => c.removeMapping({ public: 36666, protocol: "UDP" })],
+    ["removeMappingRange", (c: Client) => c.removeMappingRange({ startPort: 31000, endPort: 31010 })],
+  ] as const) {
+    await test(`${name} answers from the new location after the gateway moves`, async () => {
+      await withMovingGateway(async (g) => {
+        await g.client.getPublicIp();
+        g.moveTo(SECOND_LOCATION);
+
+        await call(g.client);
+
+        assertEqual(g.reached[g.reached.length - 1].origin, SECOND_ORIGIN, "answered from the new location");
+      });
+    });
+  }
+
+  // ========================================
   // Option handling on the client methods
   // ========================================
   console.log("\n=== Option handling ===\n");

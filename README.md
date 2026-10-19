@@ -45,6 +45,8 @@ await client.removeMapping({ public: 8080 });
 
 `getGateway()` discovers the UPnP gateway via SSDP and returns an `UpnpInfo` object. The SSDP socket is created for discovery and automatically closed when done — no cleanup needed.
 
+The search goes out again 250, 750, 1750 and 3750 ms after the first until a gateway answers, since UDP loses datagrams and some routers drop searches for a second or more at a time; it stops at the first answer, or when `timeout` (5 s by default) runs out. Only an answer whose location is an IPv4 address is taken: some routers answer twice, with an IPv6 location first, and both the mappings and the host's address are IPv4.
+
 Device info and capabilities are fetched lazily on first access and cached; the local address is resolved on every call. All three come at once via `getAll()`:
 
 ```typescript
@@ -63,7 +65,7 @@ const addr = await info.getLocalAddress();
 
 With `cacheGateway: true` the gateway found by the first discovery is kept for later calls. A request to it that fails with anything but a UPnP fault - a connection refused or reset, no answer within the request timeout, an answer that is not a SOAP reply - drops it and searches again, since a router whose UPnP service restarts answers on a new port. If the router now answers at a different location, the request is sent there once more; at the same location the original error stands. A UPnP fault, an action the router does not support, and an abort by the caller keep the cached gateway.
 
-A request sent again may find that the first one landed before the router went quiet. `createMapping` then gets 718 for its own mapping, and resolves if the router holds exactly that mapping (same internal client, internal port and description). `removeMapping` gets 714, and `removeMappingRange` 714 or 730, and they resolve. On a first request each of these codes throws as usual. `createAnyMapping` is never sent twice, because the router picks its port.
+A request sent again may find that the first one landed before the router went quiet. `createMapping` then gets 718 for its own mapping, and resolves if the router holds exactly that mapping (same internal client, internal port and description, compared as `canonicalDescription` gives it). `removeMapping` gets 714, and `removeMappingRange` 714 or 730, and they resolve. On a first request each of these codes throws as usual. `createAnyMapping` is never sent twice, because the router picks its port.
 
 ### Device Info
 
@@ -119,6 +121,11 @@ const mapping = await client.getMapping({ public: 8080, protocol: "TCP" });
 const all = await client.getMappings();
 const local = await client.getMappings({ local: true });
 const filtered = await client.getMappings({ description: /^Flux_/ });
+
+// A string filter is matched as routers store descriptions: FRITZ!Box keeps
+// "Flux_App_web" as "Flux.App.web", and both match "Flux_App_". Compare any
+// stored description the same way with canonicalDescription():
+canonicalDescription("Flux.App.web") === canonicalDescription("Flux_App_web"); // true
 ```
 
 ## Network Info
@@ -213,7 +220,7 @@ The gateway, its description and its capabilities are fetched once and shared be
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `timeout` | `number` | `1800` | SSDP discovery timeout (ms) |
+| `timeout` | `number` | `5000` | SSDP discovery timeout (ms) |
 | `cacheGateway` | `boolean` | `false` | Keep the discovered gateway between calls; see [Caching the Gateway](#caching-the-gateway) |
 | `url` | `string` | — | Bypass SSDP, connect directly |
 | `localAddress` | `string` | — | Required when using `url` |

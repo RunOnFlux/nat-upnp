@@ -1,3 +1,4 @@
+import net from "net";
 import { RawResponse } from "../index";
 import Device, {
   GatewayDevice,
@@ -113,7 +114,7 @@ export class Client implements IClient {
       throw new Error("`localAddress` must be supplied if using `url`");
     }
 
-    this.timeout = options.timeout || 1800;
+    this.timeout = options.timeout || 5000;
     this.url = options.url || null;
     this.localAddress = options.localAddress || null;
     this.cacheGateway = options.cacheGateway || false;
@@ -170,7 +171,7 @@ export class Client implements IClient {
           held !== null &&
           held.mapping.private.host === internalClient &&
           held.mapping.private.port === ports.internal.port &&
-          held.mapping.description === description;
+          canonicalDescription(held.mapping.description) === canonicalDescription(description);
         if (!isThisMapping) throw err;
         return held.raw;
       }
@@ -632,6 +633,11 @@ export class Client implements IClient {
 
       p.on("device", (headers) => {
         if (resolved) return;
+        // Mappings are IPv4 and the node's address is read from its route to
+        // the router, so only an IPv4 location will do. Some routers answer
+        // an IPv4 search twice, with an IPv6 location first; the IPv4 answer
+        // that follows is the one taken.
+        if (!isIPv4Location(headers.location)) return;
         resolved = true;
         p.emit("end");
         clearTimeout(timeout);
@@ -745,6 +751,14 @@ function validPort(value: unknown, what: string, lowest: 0 | 1 = 1): number {
  * from strict firmware, or a mapping to nothing reported as success from
  * lenient firmware. The absence is an error before the wire, not an element.
  */
+function isIPv4Location(location: string): boolean {
+  try {
+    return net.isIPv4(new URL(location).hostname);
+  } catch {
+    return false;
+  }
+}
+
 function internalClientFor(host: string | undefined, localAddress: string): string {
   const client = host || localAddress;
   if (!client) {
@@ -837,10 +851,22 @@ function findResponseKey(data: RawResponse, prefix: string): any | null {
   return key ? data[key] : null;
 }
 
+/**
+ * A mapping description as routers keep it, whatever they did to its
+ * punctuation: every run of characters other than letters and digits becomes
+ * one underscore. FRITZ!Box stores "Flux_App_web" as "Flux.App.web" and
+ * "FluxOS Reserved" as "FluxOS.Reserved"; all three forms of each compare
+ * equal here. Compare descriptions a router has stored this way, never as
+ * they were sent.
+ */
+export function canonicalDescription(description: string): string {
+  return String(description ?? "").replace(/[^A-Za-z0-9]+/g, "_");
+}
+
 function matchesDescription(desc: string, filter: RegExp | string): boolean {
   if (typeof desc !== "string") return false;
   if (filter instanceof RegExp) return filter.test(desc);
-  return desc.indexOf(filter) !== -1;
+  return canonicalDescription(desc).includes(canonicalDescription(filter));
 }
 
 export default Client;

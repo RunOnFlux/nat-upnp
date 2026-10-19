@@ -1,5 +1,6 @@
 import axios from "axios";
 import http from "http";
+import type { Socket } from "net";
 import net from "net";
 import { URL } from "url";
 import { XMLParser } from "fast-xml-parser";
@@ -94,10 +95,36 @@ function text(value: unknown): string {
   return decodeXmlEntities(fieldValue(value));
 }
 
-// UPnP devices (especially miniupnpd) always respond with Connection: close.
-// Node.js 19+ defaults to keepAlive: true on the global agent, which causes
-// "socket hang up" errors when trying to reuse connections the server already closed.
-const upnpAgent = new http.Agent({ keepAlive: false });
+/**
+ * Every request asks the router to keep its connection (Connection:
+ * keep-alive), and a connection is kept only when the router's answer says
+ * keep-alive in so many words. miniupnpd answers close; libupnp answers with
+ * no Connection header and closes anyway, so a connection kept on HTTP/1.1's
+ * default would be reused after the router had dropped it. A router that does
+ * keep it is asked over one connection rather than a new one per request:
+ * TP-Link's TPOS and VxWorks routers reset new connections that arrive faster
+ * than about one per 6 ms once some 30 have been opened, which a walk of the
+ * mapping table does within 50 ms.
+ *
+ * A kept connection is closed from this side after KEPT_CONNECTION_IDLE_MS
+ * without a request: sooner than those routers close one themselves (4 to 5 s),
+ * so a request never crosses the router's close, and the connection does not
+ * hold one of the router's few slots between unrelated calls.
+ */
+class RouterAgent extends http.Agent {
+  // Node returns whether the socket was kept; @types/node declares void.
+  keepSocketAlive(socket: Socket): void {
+    // The request the socket has just carried, and the router's answer to it.
+    const res = (socket as any)._httpMessage?.res as http.IncomingMessage | undefined;
+    const connection = String(res?.headers.connection ?? "").toLowerCase();
+    if (!connection.split(",").some((token) => token.trim() === "keep-alive")) {
+      return false as unknown as void;
+    }
+    return super.keepSocketAlive(socket);
+  }
+}
+export const KEPT_CONNECTION_IDLE_MS = 3000;
+const upnpAgent = new RouterAgent({ keepAlive: true, timeout: KEPT_CONNECTION_IDLE_MS });
 
 // Prevent OOM from malicious/broken router responses
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
@@ -389,9 +416,13 @@ export class Device implements IDevice {
 
     let responseData: string;
 
-    try {
-      const response = await axios.post(info.controlURL, body, {
+    // No redirects: a control URL that redirects is not one, and without them
+    // axios hands back Node's own request, whose reusedSocket the retry below
+    // reads.
+    const post = () =>
+      axios.post(info.controlURL, body, {
         ...axiosDefaults,
+        maxRedirects: 0,
         signal,
         headers: {
           "Content-Type": 'text/xml; charset="utf-8"',
@@ -399,6 +430,19 @@ export class Device implements IDevice {
           SOAPAction: JSON.stringify(info.service + "#" + action),
         },
       });
+
+    try {
+      let response;
+      try {
+        response = await post();
+      } catch (err: unknown) {
+        // A kept connection the router has closed fails with no answer at
+        // all; the request is sent once more, on a new connection. A new
+        // connection that fails is the router's failure and is not.
+        const e = err as { response?: unknown; code?: string; request?: { reusedSocket?: boolean } };
+        if (signal?.aborted || e.response || !e.request?.reusedSocket || e.code !== "ECONNRESET") throw err;
+        response = await post();
+      }
       responseData = response.data;
     } catch (err: unknown) {
       if (signal?.aborted) throw signal.reason;

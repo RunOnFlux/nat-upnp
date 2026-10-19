@@ -188,7 +188,11 @@ try {
 | 728 | NoPortMapsAvailable |
 | 729 | ConflictWithOtherMechanisms |
 
-`getMappings()` throws if a mid-iteration error occurs (e.g., network failure), so the caller knows they have incomplete data rather than silently receiving partial results. End-of-list signals (714, 713) are handled normally.
+`getMappings()` walks the table until the router answers an index with a fault, which ends the table whatever its code: 713 and 714 are the standard's, MikroTik and TP-Link/Omada answer 402, Mercusys 501. A fault about the action itself (401 Invalid Action, 602 Not Implemented, 606 Not Authorized) throws, as does an index that gets no answer or an answer that is not a SOAP reply, so the caller never receives a partial listing as a complete one.
+
+## Connections
+
+Every request asks the router to keep its connection open. A connection is reused only when the router's answer says `Connection: keep-alive`; miniupnpd answers `close`, and libupnp says nothing and closes, so both get a new connection per request. TP-Link's TPOS and VxWorks routers reset new connections that arrive faster than about one every 6 ms once some 30 have been opened, which a walk of the mapping table does within 50 ms; they keep a connection when asked, and are walked over one. A kept connection is closed after 3 seconds idle, before those routers close it themselves. A request on a kept connection that fails with no answer at all is sent once more on a new connection.
 
 ## Cancelling a Request
 
@@ -218,13 +222,13 @@ Port mapping methods accept a `ttl` option (seconds). Default is 1800 (30 minute
 
 ## Resource Management
 
-SSDP sockets are created per gateway discovery and closed automatically when discovery completes. No persistent sockets are held. `close()` is available to signal that the client should not be used further, but forgetting to call it does not leak resources.
+SSDP sockets are created per gateway discovery and closed automatically when discovery completes. A connection the router keeps open is held for at most 3 seconds without a request (see [Connections](#connections)) and never keeps the process alive. `close()` is available to signal that the client should not be used further, but forgetting to call it does not leak resources.
 
 ```typescript
 // Resources are managed automatically
 const client = new Client({ cacheGateway: true });
 const info = await client.getGateway(); // socket opened, used, closed
-await client.createMapping({ ... });     // uses HTTP, no persistent socket
+await client.createMapping({ ... });     // over HTTP; a kept connection closes after 3 s idle
 
 // Optional: signal no further use
 client.close();

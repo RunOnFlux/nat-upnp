@@ -2,7 +2,7 @@ import { readFileSync, existsSync, readdirSync } from "fs";
 import { join } from "path";
 import http from "http";
 import { getEventListeners } from "events";
-import type { AddressInfo } from "net";
+import net, { type AddressInfo } from "net";
 import { XMLParser } from "fast-xml-parser";
 import axiosModule, { type AxiosRequestConfig } from "axios";
 import {
@@ -13,7 +13,7 @@ import {
   decodeXmlEntities,
   untilAborted,
 } from "../src/nat-upnp/device";
-import { Device } from "../src/nat-upnp/device";
+import { Device, KEPT_CONNECTION_IDLE_MS } from "../src/nat-upnp/device";
 import { Client } from "../src/nat-upnp/client";
 import { parseMimeHeader, Ssdp, type SsdpEmitter } from "../src/nat-upnp/ssdp";
 import { surveyedRouters } from "./router-data";
@@ -1351,30 +1351,42 @@ function getSoapFaultCode(xml: string): number | null {
     }
   }
 
-  await test("a fault mid-walk is an error, not the end of the table", async () => {
-    // Only 713/714/402 mean "no entry at that index" — the corpus shows no
-    // other end-of-table dialect. A transient 501 from a busy router must not
-    // pass a partial listing off as a complete one: a caller checking whether
-    // its own mapping survived would conclude it is gone and re-create it.
-    const fault501 = () => {
+  function walkFault(code: number, description: string) {
+    return () => {
       throw {
         response: {
           data:
             '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>' +
             "<s:Fault><faultcode>s:Client</faultcode><faultstring>UPnPError</faultstring>" +
             '<detail><UPnPError xmlns="urn:schemas-upnp-org:control-1-0">' +
-            "<errorCode>501</errorCode><errorDescription>Action Failed</errorDescription>" +
+            `<errorCode>${code}</errorCode><errorDescription>${description}</errorDescription>` +
             "</UPnPError></detail></s:Fault></s:Body></s:Envelope>",
           status: 500,
         },
       };
     };
-    const err = await expectThrow(
-      () => withWalkIndexAnswering(1, fault501, (c) => c.getMappings()),
-      "getMappings with a 501 mid-walk"
+  }
+
+  await test("a fault the router gives at an index ends the table, whatever its code", async () => {
+    // The Mercusys AC12G ends its table with 501 Invalid NewPortMappingIndex.
+    const mappings = await withWalkIndexAnswering(1, walkFault(501, "Invalid NewPortMappingIndex"), (c) =>
+      c.getMappings()
     );
-    assert(err instanceof UpnpError && err.code === 501, `expected the 501 to surface, got ${err}`);
+    assertEqual(mappings.length, 1, "the entry before the fault");
   });
+
+  for (const [code, name] of [
+    [602, "Optional Action Not Implemented"],
+    [606, "Action not authorized"],
+  ] as const) {
+    await test(`a ${code} at the first index says the router will not list its table, and is thrown`, async () => {
+      await expectUpnpError(
+        withWalkIndexAnswering(0, walkFault(code, name), (c) => c.getMappings()),
+        code,
+        `getMappings answered ${code}`
+      );
+    });
+  }
 
   await test("the walk cap is an error, not a complete table", async () => {
     // A firmware that answers every index never ends the table, so the cap is
@@ -2474,11 +2486,12 @@ function getSoapFaultCode(xml: string): number | null {
         assertEqual(config!.maxContentLength, 2 * 1024 * 1024, "response size cap");
         assertEqual(config!.maxBodyLength, 2 * 1024 * 1024, "body size cap");
         assertEqual(config!.timeout, 10000, "timeout");
-        assertEqual(config!.maxRedirects, 2, "redirect cap");
-        // The agent exists to force keepAlive off: Node 19+ turned it on by
-        // default, and miniupnpd answers a kept-alive socket with hang-ups.
-        assertEqual((config!.httpAgent as { keepAlive?: boolean }).keepAlive, false, "keep-alive forced off");
+        assert(config!.maxRedirects === 2 || config!.maxRedirects === 0, "redirect cap");
+        assertEqual(config!.httpAgent, seen[0]!.httpAgent, "one agent for every call");
       }
+      const posts = seen.filter((config) => config?.headers && "SOAPAction" in (config.headers as object));
+      assert(posts.length > 0, "the SOAP calls were captured");
+      for (const config of posts) assertEqual(config!.maxRedirects, 0, "a control URL is never followed");
     } finally {
       (axiosModule as any).get = realGet;
       (axiosModule as any).post = realPost;
@@ -4643,6 +4656,250 @@ function getSoapFaultCode(xml: string): number | null {
       await new Promise((resolve) => setTimeout(resolve, 200));
       assertEqual(router.descriptionsRequested(), 0, "the description was never fetched");
     });
+  });
+
+  // ========================================
+  // Connections to the router
+  // ========================================
+  console.log("\n=== Connections to the router ===\n");
+
+  // A router on loopback that speaks HTTP over raw TCP, so the test decides
+  // exactly what each connection does: whether an answer says keep-alive,
+  // close or nothing, and whether a request is answered or reset. It serves
+  // opnsense's description and a mapping table of `entries` rows.
+  type ConnectionStyle = "keep-alive" | "close" | "silent";
+  interface RawRouter {
+    url: string;
+    connections: () => number;
+    openConnections: () => number;
+    requests: () => number;
+    soapRequests: () => number;
+    /** Requests that arrived on a connection the router had already answered and not kept. */
+    sentOnDroppedConnections: () => number;
+    /** Reset, unanswered, the next request that arrives on a connection already used once. */
+    resetNextReuse: () => void;
+    /** Reset, unanswered, the next request whatever its connection. */
+    resetNextRequest: () => void;
+  }
+
+  async function withRawRouter(
+    style: ConnectionStyle,
+    entries: number,
+    fn: (router: RawRouter) => Promise<void>,
+    answerDelayMs = 0
+  ): Promise<void> {
+    const rootdesc = loadFixture("opnsense-rootdesc.xml");
+    const scpd = loadFixture("opnsense-scpd.xml");
+    const entry = loadFixture("opnsense-soap-GetGenericPortMappingEntry.xml");
+    const endOfTable = loadFixture("opnsense-soap-GetGenericPortMappingEntry_Empty.xml");
+    let connections = 0;
+    let requests = 0;
+    let soapRequests = 0;
+    let sentOnDropped = 0;
+    let resetReuse = false;
+    let resetAny = false;
+    const sockets = new Set<net.Socket>();
+
+    const server = net.createServer((socket) => {
+      connections++;
+      sockets.add(socket);
+      socket.on("close", () => sockets.delete(socket));
+      socket.on("error", () => {});
+      let buffered = Buffer.alloc(0);
+      let answered = 0;
+      let dropped = false;
+
+      socket.on("data", (chunk: Buffer) => {
+        buffered = Buffer.concat([buffered, chunk]);
+        for (;;) {
+          const headEnd = buffered.indexOf("\r\n\r\n");
+          if (headEnd < 0) return;
+          const head = buffered.subarray(0, headEnd).toString();
+          const length = Number(/content-length:\s*(\d+)/i.exec(head)?.[1] ?? 0);
+          if (buffered.length < headEnd + 4 + length) return;
+          const body = buffered.subarray(headEnd + 4, headEnd + 4 + length).toString();
+          buffered = buffered.subarray(headEnd + 4 + length);
+          const [method, path] = head.split(" ");
+
+          if (dropped) {
+            sentOnDropped++;
+            socket.resetAndDestroy();
+            return;
+          }
+          requests++;
+          if (method === "POST") soapRequests++;
+          if (resetAny || (resetReuse && answered > 0)) {
+            resetAny = false;
+            if (answered > 0) resetReuse = false;
+            socket.resetAndDestroy();
+            return;
+          }
+
+          let status = "200 OK";
+          let payload = "";
+          if (method === "GET" && path === "/rootDesc.xml") payload = rootdesc;
+          else if (method === "GET" && path === "/WANIPCn.xml") payload = scpd;
+          else if (method === "POST") {
+            const index = Number(/<NewPortMappingIndex>(\d+)</.exec(body)?.[1] ?? -1);
+            if (index >= 0 && index < entries) payload = entry;
+            else {
+              status = "500 Internal Server Error";
+              payload = endOfTable;
+            }
+          } else status = "404 Not Found";
+
+          const connectionHeader =
+            style === "keep-alive" ? "Connection: keep-alive\r\n" : style === "close" ? "Connection: close\r\n" : "";
+          const answer =
+            `HTTP/1.1 ${status}\r\nContent-Type: text/xml\r\nContent-Length: ${Buffer.byteLength(payload)}\r\n` +
+            `${connectionHeader}\r\n${payload}`;
+          answered++;
+          const send = () => {
+            socket.write(answer);
+            if (style === "keep-alive") return;
+            // libupnp ("silent") closes without saying so; a client that kept
+            // the connection would send its next request into this window.
+            dropped = true;
+            if (style === "close") socket.end();
+            else setTimeout(() => socket.end(), 50);
+          };
+          if (answerDelayMs > 0) setTimeout(send, answerDelayMs);
+          else send();
+        }
+      });
+    });
+    server.listen(0, "127.0.0.1");
+    await new Promise((resolve) => server.once("listening", resolve));
+    const { port } = server.address() as AddressInfo;
+    try {
+      await fn({
+        url: `http://127.0.0.1:${port}/rootDesc.xml`,
+        connections: () => connections,
+        openConnections: () => sockets.size,
+        requests: () => requests,
+        soapRequests: () => soapRequests,
+        sentOnDroppedConnections: () => sentOnDropped,
+        resetNextReuse: () => {
+          resetReuse = true;
+        },
+        resetNextRequest: () => {
+          resetAny = true;
+        },
+      });
+    } finally {
+      sockets.forEach((socket) => socket.destroy());
+      await new Promise((resolve) => server.close(resolve));
+    }
+  }
+
+  function rawClient(router: RawRouter): Client {
+    return new Client({ url: router.url, localAddress: LOCAL_ADDRESS });
+  }
+
+  await test("a router that answers keep-alive is walked over one connection", async () => {
+    await withRawRouter("keep-alive", 40, async (router) => {
+      const client = rawClient(router);
+      try {
+        const mappings = await client.getMappings();
+        assertEqual(mappings.length, 40, "the whole table");
+        assert(router.requests() > 40, "every request reached the router");
+        assertEqual(router.connections(), 1, "one connection");
+      } finally {
+        client.close();
+      }
+    });
+  });
+
+  await test("a router that answers close gets a new connection per request", async () => {
+    await withRawRouter("close", 10, async (router) => {
+      const client = rawClient(router);
+      try {
+        assertEqual((await client.getMappings()).length, 10, "the whole table");
+        assertEqual(router.sentOnDroppedConnections(), 0, "nothing sent on a closed connection");
+        assertEqual(router.connections(), router.requests(), "one connection per request");
+      } finally {
+        client.close();
+      }
+    });
+  });
+
+  await test("a router that says nothing about the connection does not have it reused", async () => {
+    // libupnp, the VR2100v's daemon: no Connection header, and it closes. On
+    // HTTP/1.1's default the connection would be kept and the next request
+    // sent into it as the router drops it.
+    await withRawRouter("silent", 10, async (router) => {
+      const client = rawClient(router);
+      try {
+        assertEqual((await client.getMappings()).length, 10, "the whole table");
+        assertEqual(router.sentOnDroppedConnections(), 0, "no request sent on a connection the router dropped");
+      } finally {
+        client.close();
+      }
+    });
+  });
+
+  await test("a kept connection the router drops unanswered is asked again on a new one", async () => {
+    await withRawRouter("keep-alive", 5, async (router) => {
+      const client = rawClient(router);
+      try {
+        await client.getMappings();
+        const before = router.connections();
+        router.resetNextReuse();
+        assertEqual((await client.getMappings()).length, 5, "the second walk completes");
+        assertEqual(router.connections(), before + 1, "one new connection for the request sent again");
+      } finally {
+        client.close();
+      }
+    });
+  });
+
+  await test("a new connection the router resets is a failure, not sent again", async () => {
+    await withRawRouter("close", 5, async (router) => {
+      const client = rawClient(router);
+      try {
+        await client.getMappings();
+        const before = router.soapRequests();
+        router.resetNextRequest();
+        const err = await expectThrow(() => client.getMappings(), "a reset on a new connection");
+        assert(/ECONNRESET|socket hang up/i.test(String((err as Error).message)), `a reset, got ${err}`);
+        assertEqual(router.soapRequests() - before, 1, "the request was sent once");
+      } finally {
+        client.close();
+      }
+    });
+  });
+
+  await test("a kept connection left idle past its limit is closed, and the next call opens another", async () => {
+    await withRawRouter("keep-alive", 2, async (router) => {
+      const client = rawClient(router);
+      try {
+        await client.getMappings();
+        await client.getMappings();
+        assertEqual(router.connections(), 1, "calls close together share the connection");
+        await new Promise((resolve) => setTimeout(resolve, KEPT_CONNECTION_IDLE_MS + 500));
+        assertEqual(router.openConnections(), 0, "the idle connection was closed");
+        await client.getMappings();
+        assertEqual(router.connections(), 2, "a new connection for the next call");
+      } finally {
+        client.close();
+      }
+    });
+  });
+
+  await test("an answer slower than the kept connection's idle limit still arrives", async () => {
+    await withRawRouter(
+      "keep-alive",
+      1,
+      async (router) => {
+        const client = rawClient(router);
+        try {
+          assertEqual((await client.getMappings()).length, 1, "the table, answered slowly");
+        } finally {
+          client.close();
+        }
+      },
+      KEPT_CONNECTION_IDLE_MS + 500
+    );
   });
 
   // ========================================

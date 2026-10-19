@@ -236,19 +236,17 @@ export class Client implements IClient {
           { signal }
         );
       } catch (err) {
-        // Routers do not agree on how they signal "no entry at that index".
-        // 713 and 714 are the standard answers; MikroTik and the TP-Link/Omada
-        // models say 402 Invalid Args. Every end-of-table capture in the
-        // corpus — empty table and end of walk alike — is one of these three.
+        // A fault is the router answering about that index, and the first
+        // index it has no entry for ends the table, whatever the code: 713
+        // and 714 are the standard's, MikroTik and TP-Link/Omada say 402,
+        // Mercusys 501. Only a fault about the action itself - 401 Invalid
+        // Action, 602 Not Implemented, 606 Not Authorized - says the router
+        // will not list its table at all, and is thrown.
         //
-        // Anything else is the router failing, not the table ending, and a
-        // partial listing must never pass for a complete one: a caller
-        // checking whether its own mapping survived would conclude it is gone
-        // and re-create it. Transport failures propagate the same way — a
-        // dead socket is not an empty router.
-        if (err instanceof UpnpError && (err.code === 713 || err.code === 714 || err.code === 402)) {
-          break;
-        }
+        // No answer, or one that is not a SOAP reply, is the router failing,
+        // not the table ending, and is thrown: a dead socket is not an empty
+        // router.
+        if (err instanceof UpnpError && !ACTION_REFUSALS.has(err.code)) break;
         throw err;
       }
 
@@ -713,6 +711,8 @@ export class Client implements IClient {
 const NO_SUCH_ENTRY = 714;
 const CONFLICT_IN_MAPPING_ENTRY = 718;
 const PORT_MAPPING_NOT_FOUND = 730;
+/** Faults about an action itself rather than its arguments: Invalid Action, Not Implemented, Not Authorized. */
+const ACTION_REFUSALS = new Set([401, 602, 606]);
 
 /**
  * A port must be a 16-bit integer before it goes anywhere near the wire. The

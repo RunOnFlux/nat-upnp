@@ -2674,6 +2674,58 @@ function getSoapFaultCode(xml: string): number | null {
     });
   });
 
+  const IGD_SEARCH = "urn:schemas-upnp-org:device:InternetGatewayDevice:1";
+
+  await test("a router that answers only the last search is found within the default timeout", async () => {
+    const fake = installFakeDgram();
+    const restore = installFakeRouter("opnsense");
+    const realSend = FakeSocket.prototype.send;
+    let searches = 0;
+    FakeSocket.prototype.send = function (this: FakeSocket, ...args: Parameters<FakeSocket["send"]>) {
+      realSend.apply(this, args);
+      searches++;
+      if (searches === Ssdp.RESEND_AFTER_MS.length + 1) {
+        setImmediate(() => this.deliver(ssdpResponse(IGD_SEARCH, DESCRIPTION_URL)));
+      }
+    };
+    const client = new Client({});
+    try {
+      const info = await client.getGateway();
+      assertEqual(info.gateway.description, DESCRIPTION_URL, "found");
+      assertEqual(searches, Ssdp.RESEND_AFTER_MS.length + 1, "on the last search");
+    } finally {
+      client.close();
+      FakeSocket.prototype.send = realSend;
+      restore();
+      fake.restore();
+    }
+  });
+
+  await test("discovery passes over an IPv6 location and takes the IPv4 answer after it", async () => {
+    await withDiscovery({}, async (client, sockets) => {
+      const pending = client.getGateway();
+      await settle();
+      for (const socket of sockets) {
+        socket.deliver(ssdpResponse(IGD_SEARCH, "http://[2604:3d08:1c7f:dd05::1]:5000/rootDesc.xml"));
+        socket.deliver(ssdpResponse(IGD_SEARCH, DESCRIPTION_URL));
+      }
+      const info = await pending;
+      assertEqual(info.gateway.description, DESCRIPTION_URL, "the IPv4 location");
+    });
+  });
+
+  await test("an IPv6 location alone is never taken", async () => {
+    await withDiscovery({ timeout: 300 }, async (client, sockets) => {
+      const pending = expectThrow(() => client.getGateway(), "only an IPv6 answer");
+      await settle();
+      for (const socket of sockets) {
+        socket.deliver(ssdpResponse(IGD_SEARCH, "http://[2604:3d08:1c7f:dd05::1]:5000/rootDesc.xml"));
+      }
+      const err = await pending;
+      assert(/timed out/i.test((err as Error).message), `got: ${(err as Error).message}`);
+    });
+  });
+
   await test("discovery that nothing answers times out", async () => {
     await withDiscovery({ timeout: 200 }, async (client) => {
       const err = await expectThrow(() => client.getGateway(), "unanswered discovery");
@@ -3607,6 +3659,36 @@ function getSoapFaultCode(xml: string): number | null {
       assert(/MX: \d+\r\n/.test(query), "MX header");
       assert(query.includes("HOST: 239.255.255.250:1900\r\n"), "HOST header");
       assert(query.endsWith("\r\n\r\n"), "blank line terminates the request");
+    });
+  });
+
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  await test("a search goes out again at the resend offsets until it ends", async () => {
+    await withSsdp(async (ssdp, sockets) => {
+      const search = ssdp.search(IGD);
+      await settle();
+      await sleep(Ssdp.RESEND_AFTER_MS[1] + 100);
+      assertEqual(sockets[0].sent.length, 3, "the first search and the first two resends");
+      assert(
+        sockets[0].sent.every((sent) => sent.query === sockets[0].sent[0].query),
+        "every copy is the same search"
+      );
+      search.emit("end");
+      await sleep(Ssdp.RESEND_AFTER_MS[2] - Ssdp.RESEND_AFTER_MS[1] + 100);
+      assertEqual(sockets[0].sent.length, 3, "nothing more once the search has ended");
+    });
+  });
+
+  await test("closing the instance stops its resends", async () => {
+    await withSsdp(async (ssdp, sockets) => {
+      ssdp.search(IGD);
+      await settle();
+      await sleep(Ssdp.RESEND_AFTER_MS[0] + 100);
+      const sent = sockets[0].sent.length;
+      ssdp.close();
+      await sleep(Ssdp.RESEND_AFTER_MS[1]);
+      assertEqual(sockets[0].sent.length, sent, "no send after close");
     });
   });
 

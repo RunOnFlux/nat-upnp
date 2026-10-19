@@ -1,3 +1,4 @@
+import net from "net";
 import { RawResponse } from "../index";
 import Device, {
   GatewayDevice,
@@ -113,7 +114,7 @@ export class Client implements IClient {
       throw new Error("`localAddress` must be supplied if using `url`");
     }
 
-    this.timeout = options.timeout || 1800;
+    this.timeout = options.timeout || 5000;
     this.url = options.url || null;
     this.localAddress = options.localAddress || null;
     this.cacheGateway = options.cacheGateway || false;
@@ -632,6 +633,11 @@ export class Client implements IClient {
 
       p.on("device", (headers) => {
         if (resolved) return;
+        // Mappings are IPv4 and the node's address is read from its route to
+        // the router, so only an IPv4 location will do. Some routers answer
+        // an IPv4 search twice, with an IPv6 location first; the IPv4 answer
+        // that follows is the one taken.
+        if (!isIPv4Location(headers.location)) return;
         resolved = true;
         p.emit("end");
         clearTimeout(timeout);
@@ -745,6 +751,14 @@ function validPort(value: unknown, what: string, lowest: 0 | 1 = 1): number {
  * from strict firmware, or a mapping to nothing reported as success from
  * lenient firmware. The absence is an error before the wire, not an element.
  */
+function isIPv4Location(location: string): boolean {
+  try {
+    return net.isIPv4(new URL(location).hostname);
+  } catch {
+    return false;
+  }
+}
+
 function internalClientFor(host: string | undefined, localAddress: string): string {
   const client = host || localAddress;
   if (!client) {

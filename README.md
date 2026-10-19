@@ -45,6 +45,8 @@ await client.removeMapping({ public: 8080 });
 
 `getGateway()` discovers the UPnP gateway via SSDP and returns an `UpnpInfo` object. The SSDP socket is created for discovery and automatically closed when done — no cleanup needed.
 
+The search goes out again 250, 750, 1750 and 3750 ms after the first until a gateway answers, since UDP loses datagrams and some routers drop searches for a second or more at a time; it stops at the first answer, or when `timeout` (5 s by default) runs out. Only an answer whose location is an IPv4 address is taken: some routers answer twice, with an IPv6 location first, and both the mappings and the host's address are IPv4.
+
 Device info and capabilities are fetched lazily on first access and cached; the local address is resolved on every call. All three come at once via `getAll()`:
 
 ```typescript
@@ -213,7 +215,7 @@ The gateway, its description and its capabilities are fetched once and shared be
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `timeout` | `number` | `1800` | SSDP discovery timeout (ms) |
+| `timeout` | `number` | `5000` | SSDP discovery timeout (ms) |
 | `cacheGateway` | `boolean` | `false` | Keep the discovered gateway between calls; see [Caching the Gateway](#caching-the-gateway) |
 | `url` | `string` | — | Bypass SSDP, connect directly |
 | `localAddress` | `string` | — | Required when using `url` |

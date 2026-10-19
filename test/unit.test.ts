@@ -14,7 +14,7 @@ import {
   untilAborted,
 } from "../src/nat-upnp/device";
 import { Device, KEPT_CONNECTION_IDLE_MS, upnpAgent } from "../src/nat-upnp/device";
-import { Client } from "../src/nat-upnp/client";
+import { Client, canonicalDescription } from "../src/nat-upnp/client";
 import { parseMimeHeader, Ssdp, type SsdpEmitter } from "../src/nat-upnp/ssdp";
 import { surveyedRouters } from "./router-data";
 import { installFakeDgram, FakeSocket, ssdpResponse, settle } from "./fake-dgram";
@@ -3228,6 +3228,32 @@ function getSoapFaultCode(xml: string): number | null {
     });
   }
 
+  await test("a re-sent mapping the router holds with its description stored FRITZ!Box-style counts as made", async () => {
+    // FRITZ!Box keeps "Flux_App_x" as "Flux.App.x".
+    await withMovingGateway(async (g) => {
+      await g.client.getPublicIp();
+      g.intercept("AddPortMapping", (origin) => {
+        if (origin === FIRST_ORIGIN) {
+          g.moveTo(SECOND_LOCATION);
+          throw Object.assign(new Error("socket hang up"), { code: "ECONNRESET" });
+        }
+        throw faultResponse(718, "ConflictInMappingEntry");
+      });
+      g.intercept("GetSpecificPortMappingEntry", () => ({
+        data:
+          '<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>' +
+          '<u:GetSpecificPortMappingEntryResponse xmlns:u="urn:schemas-upnp-org:service:WANIPConnection:1">' +
+          "<NewInternalPort>36666</NewInternalPort><NewInternalClient>192.168.1.220</NewInternalClient>" +
+          `<NewEnabled>1</NewEnabled><NewPortMappingDescription>${MAPPED_DESCRIPTION.replace(/_/g, ".")}</NewPortMappingDescription>` +
+          "<NewLeaseDuration>0</NewLeaseDuration></u:GetSpecificPortMappingEntryResponse></s:Body></s:Envelope>",
+      }));
+
+      const answer = await g.client.createMapping({ ...MAPPED, description: MAPPED_DESCRIPTION });
+
+      assert("GetSpecificPortMappingEntryResponse" in answer, "the lookup that found it is the answer");
+    });
+  });
+
   await test("a re-sent mapping refused when the router holds no such entry stays refused", async () => {
     await withMovingGateway(async (g) => {
       await g.client.getPublicIp();
@@ -3442,6 +3468,34 @@ function getSoapFaultCode(xml: string): number | null {
     assertEqual(found.length, 1, "a fragment matches");
     const missed = await withRouter("opnsense", (c) => c.getMappings({ description: "nothing" }));
     assertEqual(missed.length, 0, "an unrelated fragment does not");
+  });
+
+  await test("canonicalDescription reads a description as routers store it", async () => {
+    for (const [stored, sent] of [
+      ["Flux.App.Fluxtracker", "Flux_App_Fluxtracker"],
+      ["FluxOS.Reserved", "FluxOS Reserved"],
+      ["Flux.Prelaunch.App.7001", "Flux_Prelaunch_App_7001"],
+      ["Flux.Backend.API.SSL", "Flux_Backend_API_SSL"],
+      ["Flux - Home  UI", "Flux_Home_UI"],
+    ]) {
+      assertEqual(canonicalDescription(stored), canonicalDescription(sent), `${stored} is ${sent}`);
+    }
+    assert(canonicalDescription("Flux.App.web") !== canonicalDescription("Flux_App_webdelta"), "a different name stays different");
+    assert(canonicalDescription("Flux_App_web").startsWith(canonicalDescription("Flux_App_")), "a prefix stays a prefix");
+  });
+
+  await test("getMappings matches a string description as the router stored it", async () => {
+    const fritzStored = () => ({
+      data:
+        '<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>' +
+        '<u:GetGenericPortMappingEntryResponse xmlns:u="urn:schemas-upnp-org:service:WANIPConnection:1">' +
+        "<NewRemoteHost></NewRemoteHost><NewExternalPort>31000</NewExternalPort><NewProtocol>TCP</NewProtocol>" +
+        "<NewInternalPort>31000</NewInternalPort><NewInternalClient>172.16.32.143</NewInternalClient><NewEnabled>1</NewEnabled>" +
+        "<NewPortMappingDescription>Flux.App.web</NewPortMappingDescription><NewLeaseDuration>0</NewLeaseDuration>" +
+        "</u:GetGenericPortMappingEntryResponse></s:Body></s:Envelope>",
+    });
+    const found = await withWalkIndexAnswering(0, fritzStored, (c) => c.getMappings({ description: "Flux_App_" }));
+    assertEqual(found.map((m) => m.description).join(","), "Flux.App.web", "the FRITZ!Box form matches");
   });
 
   await test("getMappings accepts a regular expression description", async () => {

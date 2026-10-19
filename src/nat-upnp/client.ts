@@ -171,7 +171,7 @@ export class Client implements IClient {
           held !== null &&
           held.mapping.private.host === internalClient &&
           held.mapping.private.port === ports.internal.port &&
-          held.mapping.description === description;
+          canonicalDescription(held.mapping.description) === canonicalDescription(description);
         if (!isThisMapping) throw err;
         return held.raw;
       }
@@ -851,10 +851,22 @@ function findResponseKey(data: RawResponse, prefix: string): any | null {
   return key ? data[key] : null;
 }
 
+/**
+ * A mapping description as routers keep it, whatever they did to its
+ * punctuation: every run of characters other than letters and digits becomes
+ * one underscore. FRITZ!Box stores "Flux_App_web" as "Flux.App.web" and
+ * "FluxOS Reserved" as "FluxOS.Reserved"; all three forms of each compare
+ * equal here. Compare descriptions a router has stored this way, never as
+ * they were sent.
+ */
+export function canonicalDescription(description: string): string {
+  return String(description ?? "").replace(/[^A-Za-z0-9]+/g, "_");
+}
+
 function matchesDescription(desc: string, filter: RegExp | string): boolean {
   if (typeof desc !== "string") return false;
   if (filter instanceof RegExp) return filter.test(desc);
-  return desc.indexOf(filter) !== -1;
+  return canonicalDescription(desc).includes(canonicalDescription(filter));
 }
 
 export default Client;

@@ -45,7 +45,7 @@ await client.removeMapping({ public: 8080 });
 
 `getGateway()` discovers the UPnP gateway via SSDP and returns an `UpnpInfo` object. The SSDP socket is created for discovery and automatically closed when done — no cleanup needed.
 
-Device info, capabilities, and local address are fetched lazily on first access, or all at once via `getAll()`:
+Device info and capabilities are fetched lazily on first access and cached; the local address is resolved on every call. All three come at once via `getAll()`:
 
 ```typescript
 const info = await client.getGateway();
@@ -53,7 +53,7 @@ const info = await client.getGateway();
 // Option A: resolve everything in one call
 const { device, capabilities, localAddress } = await info.getAll();
 
-// Option B: fetch individually (lazy, cached after first call)
+// Option B: fetch individually (device info and capabilities cached after first call)
 const device = await info.getDevice();
 const caps = await info.getCapabilities();
 const addr = await info.getLocalAddress();
@@ -90,7 +90,7 @@ console.log(caps?.supportsGetSpecificPortMappingEntry); // true
 
 ### Local Address
 
-Resolved via UDP connect (zero-packet kernel route query) — the standard technique used by miniupnpc, Python, Go, Docker, and Kubernetes:
+Resolved via UDP connect (zero-packet kernel route query) — the standard technique used by miniupnpc, Python, Go, Docker, and Kubernetes. It is resolved again on every call, and every mapping request uses the address of that moment, so a host whose address changes is mapped at its new address on the next request:
 
 ```typescript
 const addr = await info.getLocalAddress(); // "192.168.1.100"

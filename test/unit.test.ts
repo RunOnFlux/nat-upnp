@@ -2940,6 +2940,22 @@ function getSoapFaultCode(xml: string): number | null {
     });
   });
 
+  await test("a host whose address changes is mapped at its new address, from the same cached gateway", async () => {
+    await withMovingGateway(async (g) => {
+      FakeSocket.localAddress = "192.168.1.50";
+      await g.client.createMapping({ public: 16127, ttl: 0, description: "first" });
+      FakeSocket.localAddress = "192.168.1.77";
+
+      await g.client.createMapping({ public: 16127, ttl: 0, description: "second" });
+
+      const adds = g.reached.filter((r) => r.action === "AddPortMapping");
+      assertEqual(adds.length, 2, "two mappings sent");
+      assert(adds[0].body.includes("<NewInternalClient>192.168.1.50</NewInternalClient>"), "the first goes to the old address");
+      assert(adds[1].body.includes("<NewInternalClient>192.168.1.77</NewInternalClient>"), "the second goes to the new address");
+      assertEqual(g.searches(), 1, "the gateway is kept");
+    });
+  });
+
   await test("a UPnP fault is the router answering, so the gateway is kept", async () => {
     await withMovingGateway(async (g) => {
       await g.client.getPublicIp();
@@ -3498,13 +3514,14 @@ function getSoapFaultCode(xml: string): number | null {
     });
   });
 
-  await test("the resolved address is cached, so the query runs once", async () => {
+  await test("every call asks the kernel again, so a changed address is seen", async () => {
     await withDgram(async (sockets) => {
       FakeSocket.localAddress = "10.9.9.9";
       const device = new Device("http://192.168.7.1:5000/rootDesc.xml");
       assertEqual(await device.getLocalAddress(), "10.9.9.9", "first call");
-      assertEqual(await device.getLocalAddress(), "10.9.9.9", "second call");
-      assertEqual(sockets.length, 1, "the second call reuses the cached answer");
+      FakeSocket.localAddress = "10.9.9.10";
+      assertEqual(await device.getLocalAddress(), "10.9.9.10", "second call");
+      assertEqual(sockets.length, 2, "one route query per call");
     });
   });
 

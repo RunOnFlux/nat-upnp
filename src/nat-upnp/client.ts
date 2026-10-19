@@ -16,7 +16,8 @@ import Ssdp from "./ssdp";
 
 /**
  * Holds the resolved gateway and provides lazy access to device info,
- * capabilities, and local address. All are fetched on first access and cached.
+ * capabilities, and local address. Device info and capabilities are fetched on
+ * first access and cached; the local address is asked for on every call.
  */
 export class UpnpInfo {
   readonly gateway: Device;

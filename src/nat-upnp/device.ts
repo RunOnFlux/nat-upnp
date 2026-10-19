@@ -146,7 +146,6 @@ export class Device implements IDevice {
   private servicePromise: Promise<ResolvedService> | null = null;
   private deviceInfoPromise: Promise<GatewayDevice | null> | null = null;
   private capabilitiesPromise: Promise<ServiceCapabilities | null> | null = null;
-  private localAddressPromise: Promise<string> | null = null;
 
   constructor(url: string) {
     if (!url.startsWith("http")) {
@@ -182,23 +181,17 @@ export class Device implements IDevice {
    * Determine the local interface address used to reach this device.
    * Uses UDP connect — a zero-packet kernel route query. The standard technique
    * used by miniupnpc (C), Python, Go, Docker, and Kubernetes.
-   * No data is sent on the wire. Cached after first success; cleared on failure.
+   * No data is sent on the wire. Asked on every call: the host's address can
+   * change while the device stays where it is, and the query costs nothing.
    */
   public getLocalAddress(): Promise<string> {
-    if (!this.localAddressPromise) {
-      const hostname = new URL(this.description).hostname;
-      if (!hostname || !net.isIPv4(hostname)) {
-        // If hostname is IPv6 or a DNS name, fall back to resolving via the description
-        // URL host directly. For IPv6, we'd need a udp6 socket.
-        this.localAddressPromise = Promise.resolve("");
-      } else {
-        this.localAddressPromise = resolveLocalAddress(hostname).catch(() => {
-          this.localAddressPromise = null;
-          return "";
-        });
-      }
+    const hostname = new URL(this.description).hostname;
+    if (!hostname || !net.isIPv4(hostname)) {
+      // If hostname is IPv6 or a DNS name, fall back to resolving via the description
+      // URL host directly. For IPv6, we'd need a udp6 socket.
+      return Promise.resolve("");
     }
-    return this.localAddressPromise;
+    return resolveLocalAddress(hostname).catch(() => "");
   }
 
   /**

@@ -65,7 +65,7 @@ const addr = await info.getLocalAddress();
 
 With `cacheGateway: true` the gateway found by the first discovery is kept for later calls. A request to it that fails with anything but a UPnP fault - a connection refused or reset, no answer within the request timeout, an answer that is not a SOAP reply - drops it and searches again, since a router whose UPnP service restarts answers on a new port. If the router now answers at a different location, the request is sent there once more; at the same location the original error stands. A UPnP fault, an action the router does not support, and an abort by the caller keep the cached gateway.
 
-A request sent again may find that the first one landed before the router went quiet. `createMapping` then gets 718 for its own mapping, and resolves if the router holds exactly that mapping (same internal client, internal port and description). `removeMapping` gets 714, and `removeMappingRange` 714 or 730, and they resolve. On a first request each of these codes throws as usual. `createAnyMapping` is never sent twice, because the router picks its port.
+A request sent again may find that the first one landed before the router went quiet. `createMapping` then gets 718 for its own mapping, and resolves if the router holds exactly that mapping (same internal client, internal port and description, compared as `canonicalDescription` gives it). `removeMapping` gets 714, and `removeMappingRange` 714 or 730, and they resolve. On a first request each of these codes throws as usual. `createAnyMapping` is never sent twice, because the router picks its port.
 
 ### Device Info
 
@@ -121,6 +121,11 @@ const mapping = await client.getMapping({ public: 8080, protocol: "TCP" });
 const all = await client.getMappings();
 const local = await client.getMappings({ local: true });
 const filtered = await client.getMappings({ description: /^Flux_/ });
+
+// A string filter is matched as routers store descriptions: FRITZ!Box keeps
+// "Flux_App_web" as "Flux.App.web", and both match "Flux_App_". Compare any
+// stored description the same way with canonicalDescription():
+canonicalDescription("Flux.App.web") === canonicalDescription("Flux_App_web"); // true
 ```
 
 ## Network Info

@@ -3680,13 +3680,17 @@ function getSoapFaultCode(xml: string): number | null {
     });
   });
 
-  await test("closing the instance stops its resends", async () => {
+  await test("closing the instance stops its resends and holds no timer", async () => {
+    const timers = () => process.getActiveResourcesInfo().filter((kind) => kind === "Timeout").length;
     await withSsdp(async (ssdp, sockets) => {
+      const before = timers();
       ssdp.search(IGD);
       await settle();
       await sleep(Ssdp.RESEND_AFTER_MS[0] + 100);
+      assertEqual(timers(), before + Ssdp.RESEND_AFTER_MS.length - 1, "the resends still to come");
       const sent = sockets[0].sent.length;
       ssdp.close();
+      assertEqual(timers(), before, "none left to keep the process alive");
       await sleep(Ssdp.RESEND_AFTER_MS[1]);
       assertEqual(sockets[0].sent.length, sent, "no send after close");
     });

@@ -13,7 +13,7 @@ import {
   decodeXmlEntities,
   untilAborted,
 } from "../src/nat-upnp/device";
-import { Device, KEPT_CONNECTION_IDLE_MS } from "../src/nat-upnp/device";
+import { Device, KEPT_CONNECTION_IDLE_MS, upnpAgent } from "../src/nat-upnp/device";
 import { Client } from "../src/nat-upnp/client";
 import { parseMimeHeader, Ssdp, type SsdpEmitter } from "../src/nat-upnp/ssdp";
 import { surveyedRouters } from "./router-data";
@@ -4970,6 +4970,43 @@ function getSoapFaultCode(xml: string): number | null {
         client.close();
       }
     });
+  });
+
+  await test("a new connection carries no timeout of the agent's, so connecting is held to the request's own", async () => {
+    // A busy router accepts late, and a socket's own timeout runs while it
+    // connects; the request's timeout takes over only once it has. The idle
+    // limit is the pool's alone.
+    await withRawRouter("keep-alive", 1, async (router) => {
+      const timeouts = await new Promise<{ atCreation: number | undefined; pooled: number | undefined }>((resolve, reject) => {
+        const req = http.request(router.url, { agent: upnpAgent }, (res) => {
+          res.resume();
+          res.on("end", () => setImmediate(() => resolve({ atCreation, pooled: (req.socket as any)?.timeout })));
+        });
+        let atCreation: number | undefined;
+        req.on("socket", (socket) => { atCreation = (socket as any).timeout; });
+        req.on("error", reject);
+        req.end();
+      });
+      assert(!timeouts.atCreation, `no timeout on a new connection, got ${timeouts.atCreation}`);
+      assertEqual(timeouts.pooled, KEPT_CONNECTION_IDLE_MS, "the idle limit once pooled");
+    });
+  });
+
+  await test("an answer on a new connection slower than the kept connection's idle limit still arrives", async () => {
+    // Every request here is on a connection of its own: the router answers close.
+    await withRawRouter(
+      "close",
+      1,
+      async (router) => {
+        const client = rawClient(router);
+        try {
+          assertEqual((await client.getMappings()).length, 1, "the table, answered slowly");
+        } finally {
+          client.close();
+        }
+      },
+      KEPT_CONNECTION_IDLE_MS + 500
+    );
   });
 
   await test("an answer slower than the kept connection's idle limit still arrives", async () => {

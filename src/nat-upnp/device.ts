@@ -107,11 +107,25 @@ function text(value: unknown): string {
  * mapping table does within 50 ms.
  *
  * A kept connection is closed from this side after KEPT_CONNECTION_IDLE_MS
- * without a request: sooner than those routers close one themselves (4 to 5 s),
- * so a request never crosses the router's close, and the connection does not
- * hold one of the router's few slots between unrelated calls.
+ * unused in the pool: sooner than those routers close one themselves (4 to
+ * 5 s), so a request never crosses the router's close, and the connection does
+ * not hold one of the router's few slots between unrelated calls. The limit is
+ * the pool's alone. Given to the agent as its `timeout` it would apply to every
+ * socket from creation, connecting included, and a router slow to accept - a
+ * busy miniupnpd, one loop behind a backlog of five - would have requests cut
+ * off at the idle limit instead of at their own timeout.
  */
 class RouterAgent extends http.Agent {
+  constructor() {
+    super({ keepAlive: true });
+    // After the agent's own "free" handler, which sets a pooled socket's
+    // timeout to the agent's - none.
+    this.on("free", (socket: Socket) => {
+      const pooled = Object.values(this.freeSockets).some((sockets) => sockets?.includes(socket));
+      if (pooled && !socket.destroyed) socket.setTimeout(KEPT_CONNECTION_IDLE_MS);
+    });
+  }
+
   // Node returns whether the socket was kept; @types/node declares void.
   keepSocketAlive(socket: Socket): void {
     // The request the socket has just carried, and the router's answer to it.
@@ -124,7 +138,8 @@ class RouterAgent extends http.Agent {
   }
 }
 export const KEPT_CONNECTION_IDLE_MS = 3000;
-const upnpAgent = new RouterAgent({ keepAlive: true, timeout: KEPT_CONNECTION_IDLE_MS });
+/** Exported for the tests, which slow a connection's connect through it. */
+export const upnpAgent = new RouterAgent();
 
 // Prevent OOM from malicious/broken router responses
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;

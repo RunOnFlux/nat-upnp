@@ -13,8 +13,8 @@ import {
   decodeXmlEntities,
   untilAborted,
 } from "../src/nat-upnp/device";
-import { Device, KEPT_CONNECTION_IDLE_MS } from "../src/nat-upnp/device";
-import { Client } from "../src/nat-upnp/client";
+import { Device, KEPT_CONNECTION_IDLE_MS, upnpAgent } from "../src/nat-upnp/device";
+import { Client, canonicalDescription } from "../src/nat-upnp/client";
 import { parseMimeHeader, Ssdp, type SsdpEmitter } from "../src/nat-upnp/ssdp";
 import { surveyedRouters } from "./router-data";
 import { installFakeDgram, FakeSocket, ssdpResponse, settle } from "./fake-dgram";
@@ -2674,6 +2674,58 @@ function getSoapFaultCode(xml: string): number | null {
     });
   });
 
+  const IGD_SEARCH = "urn:schemas-upnp-org:device:InternetGatewayDevice:1";
+
+  await test("a router that answers only the last search is found within the default timeout", async () => {
+    const fake = installFakeDgram();
+    const restore = installFakeRouter("opnsense");
+    const realSend = FakeSocket.prototype.send;
+    let searches = 0;
+    FakeSocket.prototype.send = function (this: FakeSocket, ...args: Parameters<FakeSocket["send"]>) {
+      realSend.apply(this, args);
+      searches++;
+      if (searches === Ssdp.RESEND_AFTER_MS.length + 1) {
+        setImmediate(() => this.deliver(ssdpResponse(IGD_SEARCH, DESCRIPTION_URL)));
+      }
+    };
+    const client = new Client({});
+    try {
+      const info = await client.getGateway();
+      assertEqual(info.gateway.description, DESCRIPTION_URL, "found");
+      assertEqual(searches, Ssdp.RESEND_AFTER_MS.length + 1, "on the last search");
+    } finally {
+      client.close();
+      FakeSocket.prototype.send = realSend;
+      restore();
+      fake.restore();
+    }
+  });
+
+  await test("discovery passes over an IPv6 location and takes the IPv4 answer after it", async () => {
+    await withDiscovery({}, async (client, sockets) => {
+      const pending = client.getGateway();
+      await settle();
+      for (const socket of sockets) {
+        socket.deliver(ssdpResponse(IGD_SEARCH, "http://[2604:3d08:1c7f:dd05::1]:5000/rootDesc.xml"));
+        socket.deliver(ssdpResponse(IGD_SEARCH, DESCRIPTION_URL));
+      }
+      const info = await pending;
+      assertEqual(info.gateway.description, DESCRIPTION_URL, "the IPv4 location");
+    });
+  });
+
+  await test("an IPv6 location alone is never taken", async () => {
+    await withDiscovery({ timeout: 300 }, async (client, sockets) => {
+      const pending = expectThrow(() => client.getGateway(), "only an IPv6 answer");
+      await settle();
+      for (const socket of sockets) {
+        socket.deliver(ssdpResponse(IGD_SEARCH, "http://[2604:3d08:1c7f:dd05::1]:5000/rootDesc.xml"));
+      }
+      const err = await pending;
+      assert(/timed out/i.test((err as Error).message), `got: ${(err as Error).message}`);
+    });
+  });
+
   await test("discovery that nothing answers times out", async () => {
     await withDiscovery({ timeout: 200 }, async (client) => {
       const err = await expectThrow(() => client.getGateway(), "unanswered discovery");
@@ -3176,6 +3228,32 @@ function getSoapFaultCode(xml: string): number | null {
     });
   }
 
+  await test("a re-sent mapping the router holds with its description stored FRITZ!Box-style counts as made", async () => {
+    // FRITZ!Box keeps "Flux_App_x" as "Flux.App.x".
+    await withMovingGateway(async (g) => {
+      await g.client.getPublicIp();
+      g.intercept("AddPortMapping", (origin) => {
+        if (origin === FIRST_ORIGIN) {
+          g.moveTo(SECOND_LOCATION);
+          throw Object.assign(new Error("socket hang up"), { code: "ECONNRESET" });
+        }
+        throw faultResponse(718, "ConflictInMappingEntry");
+      });
+      g.intercept("GetSpecificPortMappingEntry", () => ({
+        data:
+          '<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>' +
+          '<u:GetSpecificPortMappingEntryResponse xmlns:u="urn:schemas-upnp-org:service:WANIPConnection:1">' +
+          "<NewInternalPort>36666</NewInternalPort><NewInternalClient>192.168.1.220</NewInternalClient>" +
+          `<NewEnabled>1</NewEnabled><NewPortMappingDescription>${MAPPED_DESCRIPTION.replace(/_/g, ".")}</NewPortMappingDescription>` +
+          "<NewLeaseDuration>0</NewLeaseDuration></u:GetSpecificPortMappingEntryResponse></s:Body></s:Envelope>",
+      }));
+
+      const answer = await g.client.createMapping({ ...MAPPED, description: MAPPED_DESCRIPTION });
+
+      assert("GetSpecificPortMappingEntryResponse" in answer, "the lookup that found it is the answer");
+    });
+  });
+
   await test("a re-sent mapping refused when the router holds no such entry stays refused", async () => {
     await withMovingGateway(async (g) => {
       await g.client.getPublicIp();
@@ -3390,6 +3468,34 @@ function getSoapFaultCode(xml: string): number | null {
     assertEqual(found.length, 1, "a fragment matches");
     const missed = await withRouter("opnsense", (c) => c.getMappings({ description: "nothing" }));
     assertEqual(missed.length, 0, "an unrelated fragment does not");
+  });
+
+  await test("canonicalDescription reads a description as routers store it", async () => {
+    for (const [stored, sent] of [
+      ["Flux.App.Fluxtracker", "Flux_App_Fluxtracker"],
+      ["FluxOS.Reserved", "FluxOS Reserved"],
+      ["Flux.Prelaunch.App.7001", "Flux_Prelaunch_App_7001"],
+      ["Flux.Backend.API.SSL", "Flux_Backend_API_SSL"],
+      ["Flux - Home  UI", "Flux_Home_UI"],
+    ]) {
+      assertEqual(canonicalDescription(stored), canonicalDescription(sent), `${stored} is ${sent}`);
+    }
+    assert(canonicalDescription("Flux.App.web") !== canonicalDescription("Flux_App_webdelta"), "a different name stays different");
+    assert(canonicalDescription("Flux_App_web").startsWith(canonicalDescription("Flux_App_")), "a prefix stays a prefix");
+  });
+
+  await test("getMappings matches a string description as the router stored it", async () => {
+    const fritzStored = () => ({
+      data:
+        '<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>' +
+        '<u:GetGenericPortMappingEntryResponse xmlns:u="urn:schemas-upnp-org:service:WANIPConnection:1">' +
+        "<NewRemoteHost></NewRemoteHost><NewExternalPort>31000</NewExternalPort><NewProtocol>TCP</NewProtocol>" +
+        "<NewInternalPort>31000</NewInternalPort><NewInternalClient>172.16.32.143</NewInternalClient><NewEnabled>1</NewEnabled>" +
+        "<NewPortMappingDescription>Flux.App.web</NewPortMappingDescription><NewLeaseDuration>0</NewLeaseDuration>" +
+        "</u:GetGenericPortMappingEntryResponse></s:Body></s:Envelope>",
+    });
+    const found = await withWalkIndexAnswering(0, fritzStored, (c) => c.getMappings({ description: "Flux_App_" }));
+    assertEqual(found.map((m) => m.description).join(","), "Flux.App.web", "the FRITZ!Box form matches");
   });
 
   await test("getMappings accepts a regular expression description", async () => {
@@ -3607,6 +3713,40 @@ function getSoapFaultCode(xml: string): number | null {
       assert(/MX: \d+\r\n/.test(query), "MX header");
       assert(query.includes("HOST: 239.255.255.250:1900\r\n"), "HOST header");
       assert(query.endsWith("\r\n\r\n"), "blank line terminates the request");
+    });
+  });
+
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  await test("a search goes out again at the resend offsets until it ends", async () => {
+    await withSsdp(async (ssdp, sockets) => {
+      const search = ssdp.search(IGD);
+      await settle();
+      await sleep(Ssdp.RESEND_AFTER_MS[1] + 100);
+      assertEqual(sockets[0].sent.length, 3, "the first search and the first two resends");
+      assert(
+        sockets[0].sent.every((sent) => sent.query === sockets[0].sent[0].query),
+        "every copy is the same search"
+      );
+      search.emit("end");
+      await sleep(Ssdp.RESEND_AFTER_MS[2] - Ssdp.RESEND_AFTER_MS[1] + 100);
+      assertEqual(sockets[0].sent.length, 3, "nothing more once the search has ended");
+    });
+  });
+
+  await test("closing the instance stops its resends and holds no timer", async () => {
+    const timers = () => process.getActiveResourcesInfo().filter((kind) => kind === "Timeout").length;
+    await withSsdp(async (ssdp, sockets) => {
+      const before = timers();
+      ssdp.search(IGD);
+      await settle();
+      await sleep(Ssdp.RESEND_AFTER_MS[0] + 100);
+      assertEqual(timers(), before + Ssdp.RESEND_AFTER_MS.length - 1, "the resends still to come");
+      const sent = sockets[0].sent.length;
+      ssdp.close();
+      assertEqual(timers(), before, "none left to keep the process alive");
+      await sleep(Ssdp.RESEND_AFTER_MS[1]);
+      assertEqual(sockets[0].sent.length, sent, "no send after close");
     });
   });
 
@@ -4884,6 +5024,43 @@ function getSoapFaultCode(xml: string): number | null {
         client.close();
       }
     });
+  });
+
+  await test("a new connection carries no timeout of the agent's, so connecting is held to the request's own", async () => {
+    // A busy router accepts late, and a socket's own timeout runs while it
+    // connects; the request's timeout takes over only once it has. The idle
+    // limit is the pool's alone.
+    await withRawRouter("keep-alive", 1, async (router) => {
+      const timeouts = await new Promise<{ atCreation: number | undefined; pooled: number | undefined }>((resolve, reject) => {
+        const req = http.request(router.url, { agent: upnpAgent }, (res) => {
+          res.resume();
+          res.on("end", () => setImmediate(() => resolve({ atCreation, pooled: (req.socket as any)?.timeout })));
+        });
+        let atCreation: number | undefined;
+        req.on("socket", (socket) => { atCreation = (socket as any).timeout; });
+        req.on("error", reject);
+        req.end();
+      });
+      assert(!timeouts.atCreation, `no timeout on a new connection, got ${timeouts.atCreation}`);
+      assertEqual(timeouts.pooled, KEPT_CONNECTION_IDLE_MS, "the idle limit once pooled");
+    });
+  });
+
+  await test("an answer on a new connection slower than the kept connection's idle limit still arrives", async () => {
+    // Every request here is on a connection of its own: the router answers close.
+    await withRawRouter(
+      "close",
+      1,
+      async (router) => {
+        const client = rawClient(router);
+        try {
+          assertEqual((await client.getMappings()).length, 1, "the table, answered slowly");
+        } finally {
+          client.close();
+        }
+      },
+      KEPT_CONNECTION_IDLE_MS + 500
+    );
   });
 
   await test("an answer slower than the kept connection's idle limit still arrives", async () => {

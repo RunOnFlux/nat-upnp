@@ -17,6 +17,14 @@ export class Ssdp implements ISsdp {
    */
   private static readonly INTERNET_ROUTE_PROBE = "8.8.8.8";
 
+  /**
+   * After the first M-SEARCH, the same search goes out again at these offsets
+   * (ms) until it ends: UDP loses some, and a router can drop searches for a
+   * second or more at a time. The gaps double, as DHCP's retransmissions do,
+   * so the last copies still reach a router that was silent for the first.
+   */
+  static readonly RESEND_AFTER_MS: readonly number[] = [250, 750, 1750, 3750];
+
   private readonly sourcePort: number;
   private readonly multicast = "239.255.255.250";
   private readonly port = 1900;
@@ -26,6 +34,7 @@ export class Ssdp implements ISsdp {
   private bound = false;
   private closed = false;
   private readonly pendingSearches: [string, SsdpEmitter][] = [];
+  private readonly resendTimers = new Set<NodeJS.Timeout>();
 
   constructor(options?: { sourcePort?: number }) {
     this.sourcePort = options?.sourcePort || 0;
@@ -138,6 +147,17 @@ export class Ssdp implements ISsdp {
 
     let ended = false;
 
+    const resends = Ssdp.RESEND_AFTER_MS.map((after) => {
+      const timer = setTimeout(() => {
+        this.resendTimers.delete(timer);
+        // a socket that died and was not replaced has no one to send for
+        if (!this.socket) return;
+        this.socket.send(query, 0, query.length, this.port, this.multicast);
+      }, after);
+      this.resendTimers.add(timer);
+      return timer;
+    });
+
     const ondevice: SearchCallback = (headers) => {
       if (ended || headers.st !== device) return;
       emitter!.emit("device", headers);
@@ -155,6 +175,10 @@ export class Ssdp implements ISsdp {
       this.ssdpEmitter.removeListener("device", ondevice);
       this.ssdpEmitter.removeListener("error", onerror);
       ended = true;
+      for (const timer of resends) {
+        clearTimeout(timer);
+        this.resendTimers.delete(timer);
+      }
     });
 
     return emitter;
@@ -166,6 +190,8 @@ export class Ssdp implements ISsdp {
     this.bound = false;
     this.pendingSearches.length = 0;
     this.ssdpEmitter.removeAllListeners();
+    for (const timer of this.resendTimers) clearTimeout(timer);
+    this.resendTimers.clear();
 
     if (this.socket) {
       try {

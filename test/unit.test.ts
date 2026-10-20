@@ -13,7 +13,7 @@ import {
   decodeXmlEntities,
   untilAborted,
 } from "../src/nat-upnp/device";
-import { Device, KEPT_CONNECTION_IDLE_MS, upnpAgent } from "../src/nat-upnp/device";
+import { Device, KEEP_ALIVE_HINT_MARGIN_MS, KEPT_CONNECTION_IDLE_MS, keptIdleLimit, upnpAgent } from "../src/nat-upnp/device";
 import { Client, canonicalDescription } from "../src/nat-upnp/client";
 import { parseMimeHeader, Ssdp, type SsdpEmitter } from "../src/nat-upnp/ssdp";
 import { surveyedRouters } from "./router-data";
@@ -4826,7 +4826,8 @@ function getSoapFaultCode(xml: string): number | null {
     style: ConnectionStyle,
     entries: number,
     fn: (router: RawRouter) => Promise<void>,
-    answerDelayMs = 0
+    answerDelayMs = 0,
+    keepAliveTimeoutS?: number
   ): Promise<void> {
     const rootdesc = loadFixture("opnsense-rootdesc.xml");
     const scpd = loadFixture("opnsense-scpd.xml");
@@ -4889,7 +4890,8 @@ function getSoapFaultCode(xml: string): number | null {
           } else status = "404 Not Found";
 
           const connectionHeader =
-            style === "keep-alive" ? "Connection: keep-alive\r\n" : style === "close" ? "Connection: close\r\n" : "";
+            (style === "keep-alive" ? "Connection: keep-alive\r\n" : style === "close" ? "Connection: close\r\n" : "") +
+            (keepAliveTimeoutS !== undefined ? `Keep-Alive: timeout=${keepAliveTimeoutS}, max=100\r\n` : "");
           const answer =
             `HTTP/1.1 ${status}\r\nContent-Type: text/xml\r\nContent-Length: ${Buffer.byteLength(payload)}\r\n` +
             `${connectionHeader}\r\n${payload}`;
@@ -5044,6 +5046,68 @@ function getSoapFaultCode(xml: string): number | null {
       assert(!timeouts.atCreation, `no timeout on a new connection, got ${timeouts.atCreation}`);
       assertEqual(timeouts.pooled, KEPT_CONNECTION_IDLE_MS, "the idle limit once pooled");
     });
+  });
+
+  /** The timeout a connection to `router` carries once it is back in the agent's pool. */
+  async function pooledTimeout(router: RawRouter): Promise<number | undefined> {
+    return new Promise((resolve, reject) => {
+      const req = http.request(router.url, { agent: upnpAgent }, (res) => {
+        res.resume();
+        res.on("end", () => setImmediate(() => resolve((req.socket as any)?.timeout)));
+      });
+      req.on("error", reject);
+      req.end();
+    });
+  }
+
+  await test("a router announcing a shorter idle time has its connection closed before it", async () => {
+    await withRawRouter(
+      "keep-alive",
+      1,
+      async (router) => {
+        assertEqual(await pooledTimeout(router), 2000 - KEEP_ALIVE_HINT_MARGIN_MS, "the router's timeout less the margin");
+      },
+      0,
+      2
+    );
+  });
+
+  await test("a router announcing a longer idle time keeps the connection's own limit", async () => {
+    await withRawRouter(
+      "keep-alive",
+      1,
+      async (router) => {
+        assertEqual(await pooledTimeout(router), KEPT_CONNECTION_IDLE_MS, "the idle limit");
+      },
+      0,
+      60
+    );
+  });
+
+  await test("a router announcing an idle time no longer than the margin has no connection kept", async () => {
+    await withRawRouter(
+      "keep-alive",
+      5,
+      async (router) => {
+        const client = rawClient(router);
+        try {
+          assertEqual((await client.getMappings()).length, 5, "the whole table");
+          assertEqual(router.connections(), router.requests(), "one connection per request");
+        } finally {
+          client.close();
+        }
+      },
+      0,
+      1
+    );
+  });
+
+  await test("keptIdleLimit reads the router's timeout among the header's parameters", () => {
+    assertEqual(keptIdleLimit(undefined), KEPT_CONNECTION_IDLE_MS, "no header");
+    assertEqual(keptIdleLimit("max=100"), KEPT_CONNECTION_IDLE_MS, "no timeout");
+    assertEqual(keptIdleLimit("max=100, timeout=2"), 2000 - KEEP_ALIVE_HINT_MARGIN_MS, "timeout after max");
+    assertEqual(keptIdleLimit("Timeout = 3"), 2000, "case and spaces");
+    assertEqual(keptIdleLimit("timeout=1"), 0, "no longer than the margin");
   });
 
   await test("an answer on a new connection slower than the kept connection's idle limit still arrives", async () => {

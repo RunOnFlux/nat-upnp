@@ -109,20 +109,25 @@ function text(value: unknown): string {
  * A kept connection is closed from this side after KEPT_CONNECTION_IDLE_MS
  * unused in the pool: sooner than those routers close one themselves (4 to
  * 5 s), so a request never crosses the router's close, and the connection does
- * not hold one of the router's few slots between unrelated calls. The limit is
- * the pool's alone. Given to the agent as its `timeout` it would apply to every
- * socket from creation, connecting included, and a router slow to accept - a
- * busy miniupnpd, one loop behind a backlog of five - would have requests cut
- * off at the idle limit instead of at their own timeout.
+ * not hold one of the router's few slots between unrelated calls. A router
+ * that announces a shorter idle time (Keep-Alive: timeout=N) has its connection
+ * closed KEEP_ALIVE_HINT_MARGIN_MS before that, and one announcing no more than
+ * the margin has none kept. The limit is the pool's alone. Given to the agent
+ * as its `timeout` it would apply to every socket from creation, connecting
+ * included, and a router slow to accept - a busy miniupnpd, one loop behind a
+ * backlog of five - would have requests cut off at the idle limit instead of at
+ * their own timeout.
  */
 class RouterAgent extends http.Agent {
+  private readonly idleLimits = new WeakMap<Socket, number>();
+
   constructor() {
     super({ keepAlive: true });
     // After the agent's own "free" handler, which sets a pooled socket's
     // timeout to the agent's - none.
     this.on("free", (socket: Socket) => {
       const pooled = Object.values(this.freeSockets).some((sockets) => sockets?.includes(socket));
-      if (pooled && !socket.destroyed) socket.setTimeout(KEPT_CONNECTION_IDLE_MS);
+      if (pooled && !socket.destroyed) socket.setTimeout(this.idleLimits.get(socket) ?? KEPT_CONNECTION_IDLE_MS);
     });
   }
 
@@ -134,10 +139,26 @@ class RouterAgent extends http.Agent {
     if (!connection.split(",").some((token) => token.trim() === "keep-alive")) {
       return false as unknown as void;
     }
+    const idleLimit = keptIdleLimit(res?.headers["keep-alive"] as string | undefined);
+    if (idleLimit <= 0) return false as unknown as void;
+    this.idleLimits.set(socket, idleLimit);
     return super.keepSocketAlive(socket);
   }
 }
 export const KEPT_CONNECTION_IDLE_MS = 3000;
+export const KEEP_ALIVE_HINT_MARGIN_MS = 1000;
+
+/**
+ * How long a kept connection may sit unused, from the router's Keep-Alive
+ * header: KEPT_CONNECTION_IDLE_MS, or less when the router announces a shorter
+ * timeout. Zero or less means the connection is not to be kept.
+ * @param header the answer's Keep-Alive header, e.g. "timeout=5, max=100"
+ */
+export function keptIdleLimit(header: string | undefined): number {
+  const hint = /(?:^|,)\s*timeout\s*=\s*(\d+)/i.exec(String(header ?? ""))?.[1];
+  if (hint === undefined) return KEPT_CONNECTION_IDLE_MS;
+  return Math.min(KEPT_CONNECTION_IDLE_MS, Number(hint) * 1000 - KEEP_ALIVE_HINT_MARGIN_MS);
+}
 /** Exported for the tests, which slow a connection's connect through it. */
 export const upnpAgent = new RouterAgent();
 

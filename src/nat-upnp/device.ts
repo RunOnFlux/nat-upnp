@@ -2,8 +2,9 @@ import axios from "axios";
 import http from "http";
 import type { Socket } from "net";
 import net from "net";
+import type { Readable } from "stream";
 import { URL } from "url";
-import { XMLParser } from "fast-xml-parser";
+import { XMLParser, XMLValidator } from "fast-xml-parser";
 
 import { RawResponse } from "../index";
 import { resolveLocalAddress } from "./route";
@@ -173,6 +174,70 @@ const axiosDefaults = {
   maxRedirects: 2,
 };
 
+/** How much of a response's end is kept for finding its closing tag. */
+const CLOSING_TAG_WINDOW = 256;
+
+/**
+ * GET one of the router's XML documents - its device description or a
+ * service's SCPD - as text.
+ *
+ * A response with neither a Content-Length nor chunked encoding ends when the
+ * router closes the connection. Some routers send the whole document and then
+ * hold the connection open: the AirTies Air4960XR's Broadcom stack (BRCM400)
+ * holds it 30 to 35 s, past the request timeout. Such a response is complete
+ * once what has arrived ends with the closing tag of `root` and validates as a
+ * whole XML document, and the connection is then closed from this side. The
+ * validation runs again only once the response has doubled in size since the
+ * last, so a response that ends every chunk with that tag costs a bounded
+ * number of passes. One that never validates is read until the router closes
+ * it, and parsed as it stands.
+ *
+ * The whole fetch, body included, is bounded by the request timeout and by
+ * MAX_RESPONSE_BYTES.
+ */
+async function fetchDocument(url: string, root: string): Promise<string> {
+  const controller = new AbortController();
+  const deadline = setTimeout(
+    () => controller.abort(new Error(`timeout of ${axiosDefaults.timeout}ms exceeded fetching ${url}`)),
+    axiosDefaults.timeout
+  );
+  const closingTag = new RegExp(`</(?:[^\\s<>/:]+:)?${root}\\s*>\\s*$`);
+  try {
+    const response = await axios.get<Readable>(url, {
+      ...axiosDefaults,
+      responseType: "stream",
+      signal: controller.signal,
+    });
+    const framedByClose =
+      response.headers["content-length"] === undefined &&
+      !/chunked/i.test(String(response.headers["transfer-encoding"] ?? ""));
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let tail = "";
+    let validatedAt = 0;
+    // Leaving the loop early destroys the stream, which closes the connection.
+    for await (const chunk of response.data as AsyncIterable<Buffer>) {
+      size += chunk.length;
+      if (size > MAX_RESPONSE_BYTES) {
+        throw new Error(`maxContentLength size of ${MAX_RESPONSE_BYTES} exceeded fetching ${url}`);
+      }
+      chunks.push(chunk);
+      if (!framedByClose) continue;
+      tail = (tail + chunk.toString("latin1")).slice(-CLOSING_TAG_WINDOW);
+      if (size < 2 * validatedAt || !closingTag.test(tail)) continue;
+      validatedAt = size;
+      const text = Buffer.concat(chunks).toString("utf8");
+      if (XMLValidator.validate(text) === true) return text;
+    }
+    return Buffer.concat(chunks).toString("utf8");
+  } catch (err) {
+    if (controller.signal.aborted) throw controller.signal.reason;
+    throw err;
+  } finally {
+    clearTimeout(deadline);
+  }
+}
+
 /** Options every router request accepts. */
 export interface RequestOpts {
   /**
@@ -229,9 +294,8 @@ export class Device implements IDevice {
    */
   private fetchDescription(): Promise<Record<string, unknown>> {
     if (!this.descriptionPromise) {
-      this.descriptionPromise = axios
-        .get(this.description, axiosDefaults)
-        .then(({ data }) => xmlParser.parse(data) as Record<string, unknown>)
+      this.descriptionPromise = fetchDocument(this.description, "root")
+        .then((text) => xmlParser.parse(text) as Record<string, unknown>)
         .catch((err) => {
           this.descriptionPromise = null;
           throw err;
@@ -333,8 +397,8 @@ export class Device implements IDevice {
     // A fetch failure must reject, not resolve: getCapabilities clears its
     // cache only on rejection, and a swallowed failure here would pin
     // "capabilities unknown" for the life of this Device.
-    const { data } = await axios.get(service.SCPDURL, axiosDefaults);
-    const parsed = xmlParser.parse(data) as Record<string, unknown>;
+    const text = await fetchDocument(service.SCPDURL, "scpd");
+    const parsed = xmlParser.parse(text) as Record<string, unknown>;
 
     const scpd = parsed as any;
     const actionList = scpd?.scpd?.actionList?.action;

@@ -3,7 +3,7 @@ import { join } from "path";
 import http from "http";
 import { getEventListeners } from "events";
 import net, { type AddressInfo } from "net";
-import { XMLParser } from "fast-xml-parser";
+import { XMLParser, XMLValidator } from "fast-xml-parser";
 import axiosModule, { type AxiosRequestConfig } from "axios";
 import {
   UpnpError,
@@ -29,6 +29,7 @@ import {
   portListing,
   DESCRIPTION_URL,
   UNMAPPED_PORT,
+  documentResponse,
   type Breakage,
 } from "./fake-router";
 
@@ -2401,10 +2402,7 @@ function getSoapFaultCode(xml: string): number | null {
         scpdAttempts += 1;
         if (garbageNext) {
           garbageNext = false;
-          return {
-            data: "<html><head><title>Login</title></head><body>portal</body></html>",
-            status: 200,
-          };
+          return documentResponse("<html><head><title>Login</title></head><body>portal</body></html>");
         }
       }
       return fakeGet(url);
@@ -2435,10 +2433,7 @@ function getSoapFaultCode(xml: string): number | null {
         scpdAttempts += 1;
         if (garbageNext) {
           garbageNext = false;
-          return {
-            data: "<html><head><title>Login</title></head><body>portal</body></html>",
-            status: 200,
-          };
+          return documentResponse("<html><head><title>Login</title></head><body>portal</body></html>");
         }
       }
       return fakeGet(url);
@@ -2507,8 +2502,8 @@ function getSoapFaultCode(xml: string): number | null {
     // did not use it.
     const restore = installFakeRouter("opnsense");
     const realGet = axiosModule.get;
-    (axiosModule as any).get = async () => ({
-      data:
+    (axiosModule as any).get = async () =>
+      documentResponse(
         '<?xml version="1.0"?><root xmlns="urn:schemas-upnp-org:device-1-0" configId="77">' +
         "<specVersion><major>1</major><minor>0</minor></specVersion><device>" +
         "<deviceType>urn:schemas-upnp-org:device:InternetGatewayDevice:1</deviceType>" +
@@ -2518,8 +2513,8 @@ function getSoapFaultCode(xml: string): number | null {
         '<serialNumber dt:dt="string" xmlns:dt="urn:x">SER123</serialNumber>' +
         '<UDN dt:dt="string" xmlns:dt="urn:x">uuid:00000001</UDN>' +
         '<presentationURL dt:dt="string" xmlns:dt="urn:x">http://192.0.2.9/</presentationURL>' +
-        "</device></root>",
-    });
+          "</device></root>"
+      );
     try {
       const info = await new Device(DESCRIPTION_URL).getDeviceInfo();
       assert(info !== null, "device info resolves");
@@ -2540,16 +2535,15 @@ function getSoapFaultCode(xml: string): number | null {
     const restore = installFakeRouter("sercomm-gpon");
     const realGet = axiosModule.get;
     (axiosModule as any).get = async (url: string) => {
-      const res = await realGet(url);
       if (url !== DESCRIPTION_URL) {
-        return {
-          data: (res as { data: string }).data.replace(
+        return documentResponse(
+          loadFixture("sercomm-gpon-scpd.xml").replace(
             /<name>AddAnyPortMapping<\/name>/,
             '<name dt:dt="string" xmlns:dt="urn:x">AddAnyPortMapping</name>'
-          ),
-        };
+          )
+        );
       }
-      return res;
+      return realGet(url);
     };
     try {
       const caps = await new Device(DESCRIPTION_URL).getCapabilities();
@@ -2592,15 +2586,14 @@ function getSoapFaultCode(xml: string): number | null {
     const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
     try {
       (axiosModule as any).get = async () =>
-        ({
-          data:
-            '<?xml version="1.0"?><root xmlns="urn:schemas-upnp-org:device-1-0"><device>' +
+        documentResponse(
+          '<?xml version="1.0"?><root xmlns="urn:schemas-upnp-org:device-1-0"><device>' +
             "<deviceType>urn:schemas-upnp-org:device:InternetGatewayDevice:1</deviceType>" +
             "<serviceList><service>" +
             "<serviceType>urn:schemas-upnp-org:service:Layer3Forwarding:1</serviceType>" +
             "<controlURL>/ctl</controlURL><SCPDURL>/scpd.xml</SCPDURL>" +
-            "</service></serviceList></device></root>",
-        }) as any;
+            "</service></serviceList></device></root>"
+        );
       const err = await expectThrow(() => client.getStatusInfo(), "no WAN service");
       assert(
         /service not found/i.test((err as Error).message),
@@ -2618,7 +2611,7 @@ function getSoapFaultCode(xml: string): number | null {
     const realGet = axiosModule.get;
     const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
     try {
-      (axiosModule as any).get = async () => ({ data: "<notroot></notroot>" }) as any;
+      (axiosModule as any).get = async () => documentResponse("<notroot></notroot>");
       const err = await expectThrow(() => client.getStatusInfo(), "no root");
       assert(
         /no root element/i.test((err as Error).message),
@@ -5141,6 +5134,350 @@ function getSoapFaultCode(xml: string): number | null {
       },
       KEPT_CONNECTION_IDLE_MS + 500
     );
+  });
+
+  // ========================================
+  // Documents that end at the connection's close
+  // ========================================
+  console.log("\n=== Documents that end at the connection's close ===\n");
+
+  /** The document in a fixture: from its start through the closing tag of `root`. */
+  function documentIn(fixture: string, root: string): string {
+    const closing = `</${root}>`;
+    return fixture.slice(0, fixture.indexOf(closing) + closing.length);
+  }
+
+  const DOCUMENT_ROOTDESC = documentIn(loadFixture("opnsense-rootdesc.xml"), "root");
+  const DOCUMENT_SCPD = documentIn(loadFixture("opnsense-scpd.xml"), "scpd");
+
+  // The head the AirTies Air4960XR's Broadcom stack sends: HTTP/1.0, no
+  // Content-Length, so the body ends only when the connection closes.
+  const CLOSE_FRAMED_HEAD =
+    "HTTP/1.0 200 OK\r\nServer: LINUX/2.4 UPnP/1.0 BRCM400/1.0\r\n" +
+    "Content-Type: application/octet-stream\r\nConnection: Close\r\n\r\n";
+
+  interface DocumentServer {
+    url: string;
+    /** Every request answered, in order, with the connection it arrived on (1 = the first accepted). */
+    requests: () => { path: string; connection: number }[];
+    /** Settles once every connection the server accepted has closed. */
+    allClosed: () => Promise<void>;
+  }
+
+  /**
+   * A router on loopback that hands each GET's path and socket to `answer`,
+   * which writes whatever it likes and closes the socket only if it chooses to.
+   * Every request on a connection is answered. The description is at
+   * /rootDesc.xml and names its SCPD /WANIPCn.xml.
+   */
+  async function withDocumentServer(
+    answer: (path: string, socket: net.Socket) => void,
+    fn: (server: DocumentServer) => Promise<void>
+  ): Promise<void> {
+    const sockets = new Set<net.Socket>();
+    const closes: Promise<void>[] = [];
+    const requests: { path: string; connection: number }[] = [];
+    const server = net.createServer((socket) => {
+      sockets.add(socket);
+      const connection = sockets.size;
+      closes.push(new Promise((resolve) => socket.once("close", () => resolve())));
+      socket.on("error", noopHandler);
+      // A GET has no body, so every head on the connection is one request.
+      let received = "";
+      socket.on("data", (chunk: Buffer) => {
+        received += chunk.toString("latin1");
+        for (let end = received.indexOf("\r\n\r\n"); end >= 0; end = received.indexOf("\r\n\r\n")) {
+          const path = received.slice(0, end).split(" ")[1];
+          received = received.slice(end + 4);
+          requests.push({ path, connection });
+          answer(path, socket);
+        }
+      });
+    });
+    server.listen(0, "127.0.0.1");
+    await new Promise((resolve) => server.once("listening", resolve));
+    const { port } = server.address() as AddressInfo;
+    try {
+      await fn({
+        url: `http://127.0.0.1:${port}/rootDesc.xml`,
+        requests: () => requests,
+        allClosed: async () => {
+          await Promise.all(closes);
+        },
+      });
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  }
+
+  function documentAt(path: string): string {
+    return path === "/WANIPCn.xml" ? DOCUMENT_SCPD : DOCUMENT_ROOTDESC;
+  }
+
+  /** Answers with the whole document at once and holds the connection open. */
+  function sendAndHold(path: string, socket: net.Socket): void {
+    socket.write(CLOSE_FRAMED_HEAD + documentAt(path));
+  }
+
+  function delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  await test("a document held open after it is sent is complete at its closing tag", async () => {
+    await withDocumentServer(sendAndHold, async (server) => {
+      const caps = await within(new Device(server.url).getCapabilities(), 2000, "the description and the SCPD");
+      assert(caps !== null, "the capabilities resolve");
+      assert(caps!.actions.includes("AddPortMapping"), `the SCPD's actions are read, got ${caps!.actions.join(",")}`);
+      await within(server.allClosed(), 2000, "the connections closing from this side");
+    });
+  });
+
+  await test("a held-open document that says keep-alive leaves its connection out of reuse", async () => {
+    // The body ends only at the close, so the connection still carries it when
+    // the document is complete: a request sent on it next would read the rest
+    // of this answer as its own.
+    await withDocumentServer(
+      (path, socket) => {
+        socket.write(
+          "HTTP/1.1 200 OK\r\nContent-Type: text/xml\r\nConnection: keep-alive\r\n\r\n" + documentAt(path)
+        );
+      },
+      async (server) => {
+        const caps = await within(new Device(server.url).getCapabilities(), 2000, "the capabilities");
+        assert(caps !== null, "the capabilities resolve");
+        const seen = server.requests();
+        assertEqual(seen.map((r) => r.path).join(","), "/rootDesc.xml,/WANIPCn.xml", "the description, then the SCPD");
+        assertEqual(seen.map((r) => r.connection).join(","), "1,2", "the SCPD goes on a new connection");
+        await within(server.allClosed(), 2000, "both connections closing from this side");
+      }
+    );
+  });
+
+  await test("a chunked document keeps its connection for the next request", async () => {
+    // Framed by its chunks, the answer ends where the body ends: the connection
+    // is clean and the agent keeps it.
+    await withDocumentServer(
+      (path, socket) => {
+        const body = Buffer.from(documentAt(path));
+        socket.write(
+          "HTTP/1.1 200 OK\r\nContent-Type: text/xml\r\nTransfer-Encoding: chunked\r\nConnection: keep-alive\r\n\r\n" +
+            `${body.length.toString(16)}\r\n${body}\r\n0\r\n\r\n`
+        );
+      },
+      async (server) => {
+        const caps = await within(new Device(server.url).getCapabilities(), 2000, "the capabilities");
+        assert(caps !== null, "the capabilities resolve");
+        assertEqual(server.requests().map((r) => r.connection).join(","), "1,1", "the SCPD reuses the connection");
+      }
+    );
+  });
+
+  await test("a held-open document with a byte order mark is complete at its closing tag", async () => {
+    await withDocumentServer(
+      (path, socket) => socket.write(CLOSE_FRAMED_HEAD + "\ufeff" + documentAt(path)),
+      async (server) => {
+        const info = await within(new Device(server.url).getDeviceInfo(), 2000, "the device info");
+        assert(info !== null, "the device info resolves");
+        assertEqual(info!.modelName, "FreeBSD router", "modelName");
+      }
+    );
+  });
+
+  await test("a router that closes after the document reads the same document", async () => {
+    let held: readonly string[] = [];
+    await withDocumentServer(sendAndHold, async (server) => {
+      held = (await new Device(server.url).getCapabilities())!.actions;
+    });
+    await withDocumentServer(
+      (path, socket) => socket.end(CLOSE_FRAMED_HEAD + documentAt(path)),
+      async (server) => {
+        const caps = await within(new Device(server.url).getCapabilities(), 2000, "the capabilities");
+        assert(caps !== null, "the capabilities resolve");
+        assertEqual(caps!.actions.join(","), held.join(","), "the same actions as the held-open router");
+      }
+    );
+  });
+
+  await test("a closing tag split across two writes completes the document", async () => {
+    await withDocumentServer(
+      (path, socket) => {
+        const answer = CLOSE_FRAMED_HEAD + documentAt(path);
+        socket.write(answer.slice(0, -4));
+        setTimeout(() => socket.write(answer.slice(-4)), 50);
+      },
+      async (server) => {
+        const caps = await within(new Device(server.url).getCapabilities(), 2000, "the capabilities");
+        assert(caps !== null, "the capabilities resolve");
+      }
+    );
+  });
+
+  await test("a closing root tag inside CDATA does not end the document early", async () => {
+    // The first write ends with "</root>" - inside the CDATA of the first
+    // friendlyName, before the services. Taken as the end, the description
+    // would have no WAN service and no model name.
+    const marked = DOCUMENT_ROOTDESC.replace(
+      "<friendlyName>OPNsense UPnP IGD &amp; PCP</friendlyName>",
+      "<friendlyName><![CDATA[</root>]]>OPNsense</friendlyName>"
+    );
+    const cut = marked.indexOf("</root>") + "</root>".length;
+    await withDocumentServer(
+      (path, socket) => {
+        if (path === "/WANIPCn.xml") {
+          socket.write(CLOSE_FRAMED_HEAD + DOCUMENT_SCPD);
+          return;
+        }
+        socket.write(CLOSE_FRAMED_HEAD + marked.slice(0, cut));
+        setTimeout(() => socket.write(marked.slice(cut)), 50);
+        setTimeout(() => socket.end(), 300);
+      },
+      async (server) => {
+        const device = new Device(server.url);
+        const info = await within(device.getDeviceInfo(), 2000, "the device info");
+        assert(info !== null, "the device info resolves");
+        assertEqual(info!.friendlyName, "</root>OPNsense", "the CDATA is read whole");
+        assertEqual(info!.modelName, "FreeBSD router", "the rest of the document is read");
+        assert((await within(device.getCapabilities(), 2000, "the capabilities")) !== null, "the WAN service is found");
+      }
+    );
+  });
+
+  await test("a document cut short is read up to the router's close", async () => {
+    // Cut before the WAN service: the description that arrived names none.
+    const cut = DOCUMENT_ROOTDESC.slice(0, DOCUMENT_ROOTDESC.indexOf("<deviceList>"));
+    await withDocumentServer(
+      (path, socket) => socket.end(CLOSE_FRAMED_HEAD + cut),
+      async (server) => {
+        const client = new Client({ url: server.url, localAddress: "127.0.0.1" });
+        try {
+          const err = await within(expectThrow(() => client.getStatusInfo(), "a cut-short description"), 2000, "the refusal");
+          assert(/service not found/i.test((err as Error).message), `got: ${(err as Error).message}`);
+        } finally {
+          client.close();
+        }
+      }
+    );
+  });
+
+  await test("a malformed document is read up to the router's close and parsed as it stands", async () => {
+    // An unescaped ampersand fails validation; the parser reads it.
+    const malformed = DOCUMENT_ROOTDESC.replace("OPNsense UPnP IGD &amp; PCP", "AT&T");
+    assert(XMLValidator.validate(malformed) !== true, "the document does not validate");
+    await withDocumentServer(
+      (path, socket) => {
+        socket.write(CLOSE_FRAMED_HEAD + malformed);
+        setTimeout(() => socket.end(), 100);
+      },
+      async (server) => {
+        const info = await within(new Device(server.url).getDeviceInfo(), 2000, "the device info");
+        assert(info !== null, "the device info resolves");
+        assertEqual(info!.friendlyName, "AT&T", "friendlyName");
+      }
+    );
+  });
+
+  await test("a response with a Content-Length is read to its length, not to its closing tag", async () => {
+    // The document arrives whole, but the length promises more: the response
+    // is not complete until the rest arrives.
+    let socketOf!: net.Socket;
+    await withDocumentServer(
+      (path, socket) => {
+        socketOf = socket;
+        const body = documentAt(path);
+        socket.write(
+          `HTTP/1.1 200 OK\r\nContent-Type: text/xml\r\nContent-Length: ${Buffer.byteLength(body) + 16}\r\n\r\n${body}`
+        );
+      },
+      async (server) => {
+        let settled = false;
+        const pending = new Device(server.url).getDeviceInfo();
+        pending.then(() => (settled = true), noopHandler);
+        await delay(1000);
+        assert(!settled, "still waiting for the rest of the body");
+        socketOf.destroy();
+        assertEqual(await within(pending, 2000, "the failure once the router drops it"), null, "the cut-off body fails");
+      }
+    );
+  });
+
+  await test("a response that never ends is cut off at the request timeout", async () => {
+    // A byte every 200 ms never leaves the socket idle, so only a deadline on
+    // the whole fetch ends it.
+    let timer: NodeJS.Timeout | undefined;
+    await withDocumentServer(
+      (path, socket) => {
+        socket.write(CLOSE_FRAMED_HEAD + "<root>");
+        timer = setInterval(() => socket.write(" "), 200);
+      },
+      async (server) => {
+        const client = new Client({ url: server.url, localAddress: "127.0.0.1" });
+        const started = Date.now();
+        try {
+          const err = await within(expectThrow(() => client.getStatusInfo(), "an endless body"), 12000, "the deadline");
+          const elapsed = Date.now() - started;
+          assert(/timeout of 10000ms exceeded fetching/.test((err as Error).message), `got: ${(err as Error).message}`);
+          assert(elapsed >= 9500 && elapsed < 11500, `cut off at the deadline, took ${elapsed}ms`);
+        } finally {
+          clearInterval(timer);
+          client.close();
+        }
+      }
+    );
+  });
+
+  await test("a response past the size cap is refused", async () => {
+    await withDocumentServer(
+      (path, socket) => {
+        socket.write(CLOSE_FRAMED_HEAD + "<root>" + " ".repeat(2 * 1024 * 1024));
+      },
+      async (server) => {
+        const client = new Client({ url: server.url, localAddress: "127.0.0.1" });
+        try {
+          const err = await within(expectThrow(() => client.getStatusInfo(), "an oversized body"), 5000, "the refusal");
+          assert(/maxContentLength size of 2097152 exceeded/.test((err as Error).message), `got: ${(err as Error).message}`);
+        } finally {
+          client.close();
+        }
+      }
+    );
+  });
+
+  await test("a response ending every write with the closing tag is validated a bounded number of times", async () => {
+    const realValidate = XMLValidator.validate;
+    let validations = 0;
+    (XMLValidator as any).validate = (...args: Parameters<typeof realValidate>) => {
+      validations++;
+      return realValidate(...args);
+    };
+    const writes = 300;
+    try {
+      await withDocumentServer(
+        async (path, socket) => {
+          socket.write(CLOSE_FRAMED_HEAD + "<root>");
+          for (let i = 0; i < writes; i++) {
+            socket.write("<a></root>");
+            await delay(2);
+          }
+          socket.end();
+        },
+        async (server) => {
+          const client = new Client({ url: server.url, localAddress: "127.0.0.1" });
+          try {
+            await within(expectThrow(() => client.getStatusInfo(), "an invalid document"), 5000, "the refusal");
+          } finally {
+            client.close();
+          }
+        }
+      );
+    } finally {
+      (XMLValidator as any).validate = realValidate;
+    }
+    // Each validation needs the response to have doubled since the last. The
+    // body is 6 + 300 * 10 = 3006 bytes and the first validation sees at least
+    // the 16 of "<root><a></root>", so at most 1 + log2(3006 / 16) < 9 run.
+    assert(validations > 0, "the closing tag was seen");
+    assert(validations <= 9, `validated ${validations} times for ${writes} writes`);
   });
 
   // ========================================

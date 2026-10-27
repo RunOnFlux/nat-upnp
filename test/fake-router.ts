@@ -1,6 +1,7 @@
 import axios from "axios";
 import { readFileSync } from "fs";
 import { join } from "path";
+import { Readable } from "stream";
 
 const fixturesDir = join(__dirname, "..", "..", "test", "fixtures");
 
@@ -18,6 +19,18 @@ export function tryFixture(name: string): string | null {
 }
 
 /** Host the fake router answers on. Relative URLs in a fixture resolve against it. */
+/**
+ * A GET answer in the shape axios gives a `responseType: "stream"` request: the
+ * document, sized by its Content-Length, on a stream that then ends.
+ */
+export function documentResponse(body: string): { status: number; headers: Record<string, string>; data: Readable } {
+  return {
+    status: 200,
+    headers: { "content-length": String(Buffer.byteLength(body)) },
+    data: Readable.from([Buffer.from(body)]),
+  };
+}
+
 export const DESCRIPTION_URL = "http://192.0.2.1:5000/rootDesc.xml";
 
 /** External port no fixture has a mapping for, so the router answers NotFound. */
@@ -270,9 +283,9 @@ export function installFakeRouter(router: string, breakage?: Breakage): () => vo
   const advertised = advertisedUrls(rootdesc);
 
   (axios as any).get = async (url: string) => {
-    if (href(url) === href(DESCRIPTION_URL)) return { data: rootdesc };
+    if (href(url) === href(DESCRIPTION_URL)) return documentResponse(rootdesc);
     if (advertised.scpd.has(href(url) ?? "")) {
-      return { data: loadFixture(`${router}-scpd.xml`) };
+      return documentResponse(loadFixture(`${router}-scpd.xml`));
     }
     throw new Error(`fake router: GET ${url}, which ${router}'s description never advertised`);
   };

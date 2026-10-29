@@ -75,7 +75,11 @@ console.log(device?.manufacturer);         // "FreeBSD"
 console.log(device?.modelName);            // "FreeBSD router"
 console.log(device?.modelNumber);          // "26.1.3"
 console.log(device?.wan?.modelDescription); // "MiniUPnP daemon version 2.3.9"
+console.log(device?.ssdpServer);           // "FreeBSD/14.3 UPnP/1.1 MiniUPnPd/2.3.9"
+console.log(device?.httpServer);           // "FreeBSD/14.3 UPnP/1.1 MiniUPnPd/2.3.9"
 ```
+
+`ssdpServer` is the SERVER header of the SSDP answer that announced the router, and is null for a client given a URL. `httpServer` is the Server header the device description was served with. Each is null when the router sends none or a blank one.
 
 ### Service Capabilities
 

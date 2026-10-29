@@ -643,7 +643,10 @@ export class Client implements IClient {
         clearTimeout(timeout);
 
         try {
-          const upnpInfo = new UpnpInfo(new Device(headers.location), this.localAddress ?? undefined);
+          const upnpInfo = new UpnpInfo(
+            new Device(headers.location, { ssdpServer: headers.server }),
+            this.localAddress ?? undefined
+          );
           if (this.cacheGateway) {
             this.cachedInfo = upnpInfo;
           }

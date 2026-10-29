@@ -23,10 +23,16 @@ export function tryFixture(name: string): string | null {
  * A GET answer in the shape axios gives a `responseType: "stream"` request: the
  * document, sized by its Content-Length, on a stream that then ends.
  */
-export function documentResponse(body: string): { status: number; headers: Record<string, string>; data: Readable } {
+export function documentResponse(
+  body: string,
+  server?: string
+): { status: number; headers: Record<string, string>; data: Readable } {
   return {
     status: 200,
-    headers: { "content-length": String(Buffer.byteLength(body)) },
+    headers: {
+      "content-length": String(Buffer.byteLength(body)),
+      ...(server === undefined ? {} : { server }),
+    },
     data: Readable.from([Buffer.from(body)]),
   };
 }
@@ -115,6 +121,15 @@ function fillEntry(xml: string, entry: V1TableEntry): string {
     xml = xml.replace(new RegExp(`(<((?:[\\w-]+:)?${tag})>)[^<]*(</\\2>)`), `$1${value}$3`);
   }
   return xml;
+}
+
+/**
+ * The Server header the router sends with its description and with its SCPD;
+ * a document whose entry is unset is served with none.
+ */
+export let serverHeaders: { description?: string; scpd?: string } = {};
+export function setServerHeaders(next: { description?: string; scpd?: string }): void {
+  serverHeaders = next;
 }
 
 /** Ways a router can fail that a captured response cannot express. */
@@ -283,9 +298,9 @@ export function installFakeRouter(router: string, breakage?: Breakage): () => vo
   const advertised = advertisedUrls(rootdesc);
 
   (axios as any).get = async (url: string) => {
-    if (href(url) === href(DESCRIPTION_URL)) return documentResponse(rootdesc);
+    if (href(url) === href(DESCRIPTION_URL)) return documentResponse(rootdesc, serverHeaders.description);
     if (advertised.scpd.has(href(url) ?? "")) {
-      return documentResponse(loadFixture(`${router}-scpd.xml`));
+      return documentResponse(loadFixture(`${router}-scpd.xml`), serverHeaders.scpd);
     }
     throw new Error(`fake router: GET ${url}, which ${router}'s description never advertised`);
   };
@@ -360,5 +375,6 @@ export function installFakeRouter(router: string, breakage?: Breakage): () => vo
     (axios as any).get = realGet;
     (axios as any).post = realPost;
     onRequest = null;
+    serverHeaders = {};
   };
 }

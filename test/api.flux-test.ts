@@ -68,6 +68,8 @@ setupTest("NAT-UPNP/Client", (opts) => {
       console.log("  Model Number:", device.modelNumber);
       console.log("  Serial:", device.serialNumber);
       console.log("  Spec:", device.specVersion.major + "." + device.specVersion.minor);
+      console.log("  SSDP SERVER:", device.ssdpServer);
+      console.log("  HTTP Server:", device.httpServer);
       if (device.wan) {
         console.log("  WAN Daemon:", device.wan.modelDescription);
         console.log("  WAN Build:", device.wan.modelNumber);
@@ -607,11 +609,19 @@ setupTest("NAT-UPNP/Client", (opts) => {
     console.log("  Non-SSDP address:", await nonSsdpInfo.getLocalAddress());
     if (nonSsdpDevice) {
       console.log("  Non-SSDP device:", nonSsdpDevice.manufacturer, nonSsdpDevice.modelName);
+      console.log("  Non-SSDP SSDP SERVER:", nonSsdpDevice.ssdpServer);
+      console.log("  Non-SSDP HTTP Server:", nonSsdpDevice.httpServer);
     }
 
+    // The same description is served to both; only the discovered one was
+    // announced by an SSDP answer.
     const same =
       await nonSsdpInfo.getLocalAddress() === await upnpInfo.getLocalAddress() &&
-      (!nonSsdpDevice || !device || nonSsdpDevice.manufacturer === device.manufacturer);
+      (!nonSsdpDevice || !device || (
+        nonSsdpDevice.manufacturer === device.manufacturer &&
+        nonSsdpDevice.ssdpServer === null &&
+        nonSsdpDevice.httpServer === device.httpServer
+      ));
     nonSsdpClient.close();
     return same;
   });

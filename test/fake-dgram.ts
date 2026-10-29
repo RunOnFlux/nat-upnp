@@ -98,15 +98,24 @@ export function installFakeDgram(): { sockets: FakeSocket[]; restore: () => void
   };
 }
 
-/** A well-formed M-SEARCH response for the given search target. */
-export function ssdpResponse(st: string, location = "http://192.0.2.1:5000/rootDesc.xml"): string {
+export const SSDP_SERVER = "FreeBSD/13 UPnP/1.1 MiniUPnPd/2.3.9";
+
+/**
+ * A well-formed M-SEARCH response for the given search target. `server` is
+ * the SERVER line as sent, header name included; null sends none.
+ */
+export function ssdpResponse(
+  st: string,
+  location = "http://192.0.2.1:5000/rootDesc.xml",
+  server: string | null = `SERVER: ${SSDP_SERVER}`
+): string {
   return [
     "HTTP/1.1 200 OK",
     "CACHE-CONTROL: max-age=120",
     `ST: ${st}`,
     "USN: uuid:00000001-0000-4000-8000-000000000001",
     `LOCATION: ${location}`,
-    "SERVER: FreeBSD/13 UPnP/1.1 MiniUPnPd/2.3.9",
+    ...(server === null ? [] : [server]),
     "",
     "",
   ].join("\r\n");

@@ -8,6 +8,7 @@ export {
   xmlParser,
 } from "./nat-upnp/device";
 export type {
+  DeviceOpts,
   GatewayDevice,
   ServiceCapabilities,
   RequestOpts,

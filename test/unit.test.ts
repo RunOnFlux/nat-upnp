@@ -17,7 +17,7 @@ import { Device, KEEP_ALIVE_HINT_MARGIN_MS, KEPT_CONNECTION_IDLE_MS, keptIdleLim
 import { Client, canonicalDescription } from "../src/nat-upnp/client";
 import { parseMimeHeader, Ssdp, type SsdpEmitter } from "../src/nat-upnp/ssdp";
 import { surveyedRouters } from "./router-data";
-import { installFakeDgram, FakeSocket, ssdpResponse, settle } from "./fake-dgram";
+import { installFakeDgram, FakeSocket, ssdpResponse, settle, SSDP_SERVER } from "./fake-dgram";
 import {
   installFakeRouter,
   requests,
@@ -26,6 +26,7 @@ import {
   setV2Overrides,
   setV2Escaped,
   setOnRequest,
+  setServerHeaders,
   portListing,
   DESCRIPTION_URL,
   UNMAPPED_PORT,
@@ -1186,8 +1187,71 @@ function getSoapFaultCode(xml: string): number | null {
       assertEqual(device!.specVersion.major, expected.specVersion.major, `${router}: spec major`);
       assertEqual(device!.specVersion.minor, expected.specVersion.minor, `${router}: spec minor`);
       assertEqual(device!.descriptionURL, DESCRIPTION_URL, `${router}: descriptionURL`);
+      assertEqual(device!.ssdpServer, null, `${router}: a router given by URL was announced by no SSDP answer`);
+      assertEqual(device!.httpServer, null, `${router}: a description served with no Server header`);
     });
   }
+
+  // ========================================
+  // The router's own name for its software
+  // ========================================
+  console.log("\n=== Server headers ===\n");
+
+  const DESCRIPTION_SERVER = "Linux/3.4.11, UPnP/1.0, Portable SDK for UPnP devices/1.6.18";
+  const SCPD_SERVER = "lighttpd/1.4.35";
+
+  await test("getDevice reports the Server header the description was served with", async () => {
+    setServerHeaders({ description: DESCRIPTION_SERVER });
+    const device = await withRouter("opnsense", async (c) => (await c.getGateway()).getDevice());
+    assertEqual(device!.httpServer, DESCRIPTION_SERVER, "httpServer");
+  });
+
+  await test("httpServer is the description's Server header, not the SCPD's, whichever is fetched first", async () => {
+    for (const scpdFirst of [true, false]) {
+      setServerHeaders({ description: DESCRIPTION_SERVER, scpd: SCPD_SERVER });
+      const device = await withRouter("opnsense", async (c) => {
+        const info = await c.getGateway();
+        if (scpdFirst) assert((await info.getCapabilities()) !== null, "the SCPD was read");
+        const read = await info.getDevice();
+        if (!scpdFirst) assert((await info.getCapabilities()) !== null, "the SCPD was read");
+        return read;
+      });
+      assertEqual(device!.httpServer, DESCRIPTION_SERVER, `httpServer (SCPD first: ${scpdFirst})`);
+    }
+  });
+
+  await test("the description a request already fetched carries its Server header to getDevice", async () => {
+    setServerHeaders({ description: DESCRIPTION_SERVER });
+    const device = await withRouter("opnsense", async (c) => {
+      await c.getPublicIp();
+      return (await c.getGateway()).getDevice();
+    });
+    assert(
+      requests.some((r) => r.action === "GetExternalIPAddress"),
+      "the request resolved the service from the description first"
+    );
+    assertEqual(device!.httpServer, DESCRIPTION_SERVER, "httpServer");
+  });
+
+  await test("a Server header is reported trimmed, and a blank one as null", async () => {
+    for (const [sent, reported] of [
+      [`  ${DESCRIPTION_SERVER}  `, DESCRIPTION_SERVER],
+      ["", null],
+      ["   ", null],
+    ] as const) {
+      setServerHeaders({ description: sent });
+      const device = await withRouter("opnsense", async (c) => (await c.getGateway()).getDevice());
+      assertEqual(device!.httpServer, reported, `httpServer for ${JSON.stringify(sent)}`);
+    }
+  });
+
+  await test("a Device keeps the SSDP SERVER it is given, trimmed, and null for none or a blank one", () => {
+    assertEqual(new Device(DESCRIPTION_URL).ssdpServer, null, "no options");
+    assertEqual(new Device(DESCRIPTION_URL, {}).ssdpServer, null, "no ssdpServer");
+    assertEqual(new Device(DESCRIPTION_URL, { ssdpServer: null }).ssdpServer, null, "null");
+    assertEqual(new Device(DESCRIPTION_URL, { ssdpServer: "  " }).ssdpServer, null, "blank");
+    assertEqual(new Device(DESCRIPTION_URL, { ssdpServer: ` ${SSDP_SERVER} ` }).ssdpServer, SSDP_SERVER, "trimmed");
+  });
 
   // ========================================
   // The request the client builds
@@ -2665,6 +2729,41 @@ function getSoapFaultCode(xml: string): number | null {
       const device = await info.getDevice();
       assertEqual(device!.manufacturer, "FreeBSD", "the discovered device is readable");
     });
+  });
+
+  /** Discover the gateway from one SSDP answer carrying `serverLine`, and read its device. */
+  async function discoveredDevice(serverLine: string | null) {
+    return withDiscovery({}, async (client, sockets) => {
+      const pending = client.getGateway();
+      await settle();
+      for (const socket of sockets) {
+        socket.deliver(
+          ssdpResponse("urn:schemas-upnp-org:device:InternetGatewayDevice:1", DESCRIPTION_URL, serverLine)
+        );
+      }
+      return (await pending).getDevice();
+    });
+  }
+
+  await test("a discovered router reports the SERVER header of the SSDP answer that announced it", async () => {
+    setServerHeaders({ description: DESCRIPTION_SERVER });
+    const device = await discoveredDevice(`SERVER: ${SSDP_SERVER}`);
+    assertEqual(device!.ssdpServer, SSDP_SERVER, "ssdpServer");
+    assertEqual(device!.httpServer, DESCRIPTION_SERVER, "httpServer is read alongside it");
+  });
+
+  await test("the SSDP SERVER header is read whatever the case of its name", async () => {
+    for (const name of ["Server", "server"]) {
+      const device = await discoveredDevice(`${name}: ${SSDP_SERVER}`);
+      assertEqual(device!.ssdpServer, SSDP_SERVER, `ssdpServer from "${name}:"`);
+    }
+  });
+
+  await test("a discovered router that sends no SERVER header, or a blank one, reports null", async () => {
+    for (const line of [null, "SERVER:", "SERVER:   "]) {
+      const device = await discoveredDevice(line);
+      assertEqual(device!.ssdpServer, null, `ssdpServer for ${JSON.stringify(line)}`);
+    }
   });
 
   const IGD_SEARCH = "urn:schemas-upnp-org:device:InternetGatewayDevice:1";

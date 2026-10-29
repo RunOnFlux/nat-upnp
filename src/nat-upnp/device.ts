@@ -194,8 +194,13 @@ const CLOSING_TAG_WINDOW = 256;
  *
  * The whole fetch, body included, is bounded by the request timeout and by
  * MAX_RESPONSE_BYTES.
+ *
+ * `server` is the response's Server header, null when the router sends none.
  */
-async function fetchDocument(url: string, root: string): Promise<string> {
+async function fetchDocument(
+  url: string,
+  root: string
+): Promise<{ text: string; server: string | null }> {
   const controller = new AbortController();
   const deadline = setTimeout(
     () => controller.abort(new Error(`timeout of ${axiosDefaults.timeout}ms exceeded fetching ${url}`)),
@@ -208,6 +213,7 @@ async function fetchDocument(url: string, root: string): Promise<string> {
       responseType: "stream",
       signal: controller.signal,
     });
+    const server = serverHeader(response.headers["server"]);
     const framedByClose =
       response.headers["content-length"] === undefined &&
       !/chunked/i.test(String(response.headers["transfer-encoding"] ?? ""));
@@ -227,15 +233,22 @@ async function fetchDocument(url: string, root: string): Promise<string> {
       if (size < 2 * validatedAt || !closingTag.test(tail)) continue;
       validatedAt = size;
       const text = Buffer.concat(chunks).toString("utf8");
-      if (XMLValidator.validate(text) === true) return text;
+      if (XMLValidator.validate(text) === true) return { text, server };
     }
-    return Buffer.concat(chunks).toString("utf8");
+    return { text: Buffer.concat(chunks).toString("utf8"), server };
   } catch (err) {
     if (controller.signal.aborted) throw controller.signal.reason;
     throw err;
   } finally {
     clearTimeout(deadline);
   }
+}
+
+/** A Server header as a router's software names itself; null when absent or blank. */
+function serverHeader(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed === "" ? null : trimmed;
 }
 
 /** Options every router request accepts. */
@@ -264,22 +277,31 @@ export function untilAborted<T>(work: Promise<T>, signal?: AbortSignal): Promise
   });
 }
 
+/** Options for a Device. */
+export interface DeviceOpts {
+  /** The SERVER header of the SSDP answer that announced the device. */
+  ssdpServer?: string | null;
+}
+
 export class Device implements IDevice {
   readonly description: string;
   readonly services: readonly string[];
+  /** The SERVER header of the SSDP answer that announced the device; null when none was given. */
+  readonly ssdpServer: string | null;
 
   // Lazy-init promises — concurrent callers share the same promise.
   // On error, the cache is cleared so subsequent calls retry.
-  private descriptionPromise: Promise<Record<string, unknown>> | null = null;
+  private descriptionPromise: Promise<{ parsed: Record<string, unknown>; server: string | null }> | null = null;
   private servicePromise: Promise<ResolvedService> | null = null;
   private deviceInfoPromise: Promise<GatewayDevice | null> | null = null;
   private capabilitiesPromise: Promise<ServiceCapabilities | null> | null = null;
 
-  constructor(url: string) {
+  constructor(url: string, options: DeviceOpts = {}) {
     if (!url.startsWith("http")) {
       throw new Error(`Invalid UPnP device URL: ${url}`);
     }
     this.description = url;
+    this.ssdpServer = serverHeader(options.ssdpServer);
     // Preference order: v2 first, then v1, then PPP
     this.services = [
       "urn:schemas-upnp-org:service:WANIPConnection:2",
@@ -289,13 +311,14 @@ export class Device implements IDevice {
   }
 
   /**
-   * Fetch and parse the root device description XML.
-   * Concurrent calls share one promise. Clears cache on error to allow retry.
+   * Fetch and parse the root device description XML, with the Server header
+   * it was served with. Concurrent calls share one promise. Clears cache on
+   * error to allow retry.
    */
-  private fetchDescription(): Promise<Record<string, unknown>> {
+  private fetchDescription(): Promise<{ parsed: Record<string, unknown>; server: string | null }> {
     if (!this.descriptionPromise) {
       this.descriptionPromise = fetchDocument(this.description, "root")
-        .then((text) => xmlParser.parse(text) as Record<string, unknown>)
+        .then(({ text, server }) => ({ parsed: xmlParser.parse(text) as Record<string, unknown>, server }))
         .catch((err) => {
           this.descriptionPromise = null;
           throw err;
@@ -336,7 +359,7 @@ export class Device implements IDevice {
   }
 
   private async buildDeviceInfo(): Promise<GatewayDevice> {
-    const parsed = await this.fetchDescription();
+    const { parsed, server } = await this.fetchDescription();
     const root = (parsed as any)?.root || {};
     const device = root.device || {};
     const { devices } = this.parseDescription({ device });
@@ -358,6 +381,8 @@ export class Device implements IDevice {
       },
       configId: root["@_configId"] ? String(root["@_configId"]) : null,
       descriptionURL: this.description,
+      ssdpServer: this.ssdpServer,
+      httpServer: server,
     };
 
     const wanDevice = devices.find(
@@ -397,7 +422,7 @@ export class Device implements IDevice {
     // A fetch failure must reject, not resolve: getCapabilities clears its
     // cache only on rejection, and a swallowed failure here would pin
     // "capabilities unknown" for the life of this Device.
-    const text = await fetchDocument(service.SCPDURL, "scpd");
+    const { text } = await fetchDocument(service.SCPDURL, "scpd");
     const parsed = xmlParser.parse(text) as Record<string, unknown>;
 
     const scpd = parsed as any;
@@ -453,7 +478,7 @@ export class Device implements IDevice {
   }
 
   private async buildResolvedService(): Promise<ResolvedService> {
-    const parsed = await this.fetchDescription();
+    const { parsed } = await this.fetchDescription();
     const root = (parsed as any)?.root;
     if (!root) {
       throw new Error(
@@ -756,6 +781,10 @@ export interface GatewayDevice {
   readonly specVersion: { readonly major: number; readonly minor: number };
   readonly configId: string | null;
   readonly descriptionURL: string;
+  /** The SERVER header of the SSDP answer that announced the router; null when not discovered or not sent. */
+  readonly ssdpServer: string | null;
+  /** The Server header the device description was served with; null when not sent. */
+  readonly httpServer: string | null;
   wan?: {
     readonly manufacturer: string;
     readonly modelDescription: string;

@@ -301,7 +301,7 @@ export class Device implements IDevice {
       throw new Error(`Invalid UPnP device URL: ${url}`);
     }
     this.description = url;
-    this.ssdpServer = serverHeader(options.ssdpServer);
+    this.ssdpServer = serverHeader(options?.ssdpServer);
     // Preference order: v2 first, then v1, then PPP
     this.services = [
       "urn:schemas-upnp-org:service:WANIPConnection:2",

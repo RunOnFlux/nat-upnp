@@ -13,7 +13,7 @@ import {
   decodeXmlEntities,
   untilAborted,
 } from "../src/nat-upnp/device";
-import { Device, KEEP_ALIVE_HINT_MARGIN_MS, KEPT_CONNECTION_IDLE_MS, keptIdleLimit, upnpAgent } from "../src/nat-upnp/device";
+import { Device, type DeviceOpts, KEEP_ALIVE_HINT_MARGIN_MS, KEPT_CONNECTION_IDLE_MS, keptIdleLimit, upnpAgent } from "../src/nat-upnp/device";
 import { Client, canonicalDescription } from "../src/nat-upnp/client";
 import { parseMimeHeader, Ssdp, type SsdpEmitter } from "../src/nat-upnp/ssdp";
 import { surveyedRouters } from "./router-data";
@@ -1249,6 +1249,8 @@ function getSoapFaultCode(xml: string): number | null {
     assertEqual(new Device(DESCRIPTION_URL).ssdpServer, null, "no options");
     assertEqual(new Device(DESCRIPTION_URL, {}).ssdpServer, null, "no ssdpServer");
     assertEqual(new Device(DESCRIPTION_URL, { ssdpServer: null }).ssdpServer, null, "null");
+    assertEqual(new Device(DESCRIPTION_URL, null as unknown as DeviceOpts).ssdpServer, null, "options null");
+    assertEqual(new Device(DESCRIPTION_URL, { ssdpServer: 42 as unknown as string }).ssdpServer, null, "not a string");
     assertEqual(new Device(DESCRIPTION_URL, { ssdpServer: "  " }).ssdpServer, null, "blank");
     assertEqual(new Device(DESCRIPTION_URL, { ssdpServer: ` ${SSDP_SERVER} ` }).ssdpServer, SSDP_SERVER, "trimmed");
   });
@@ -2806,6 +2808,33 @@ function getSoapFaultCode(xml: string): number | null {
     });
   });
 
+  await test("the SSDP SERVER reported is the IPv4 answer's, not the IPv6 answer passed over before it", async () => {
+    await withDiscovery({}, async (client, sockets) => {
+      const pending = client.getGateway();
+      await settle();
+      for (const socket of sockets) {
+        socket.deliver(ssdpResponse(IGD_SEARCH, "http://[2604:3d08:1c7f:dd05::1]:5000/rootDesc.xml", "SERVER: the IPv6 answer"));
+        socket.deliver(ssdpResponse(IGD_SEARCH, DESCRIPTION_URL, "SERVER: the IPv4 answer"));
+      }
+      const device = await (await pending).getDevice();
+      assertEqual(device!.ssdpServer, "the IPv4 answer", "ssdpServer");
+    });
+  });
+
+  await test("the SSDP SERVER reported is the answer taken, not a later one", async () => {
+    await withDiscovery({}, async (client, sockets) => {
+      const pending = client.getGateway();
+      await settle();
+      for (const socket of sockets) {
+        socket.deliver(ssdpResponse(IGD_SEARCH, DESCRIPTION_URL, "SERVER: the first answer"));
+        socket.deliver(ssdpResponse(IGD_SEARCH, "http://192.0.2.9:5000/rootDesc.xml", "SERVER: a later answer"));
+      }
+      const info = await pending;
+      assertEqual(info.gateway.description, DESCRIPTION_URL, "the first answer's location");
+      assertEqual((await info.getDevice())!.ssdpServer, "the first answer", "ssdpServer");
+    });
+  });
+
   await test("an IPv6 location alone is never taken", async () => {
     await withDiscovery({ timeout: 300 }, async (client, sockets) => {
       const pending = expectThrow(() => client.getGateway(), "only an IPv6 answer");
@@ -2935,6 +2964,8 @@ function getSoapFaultCode(xml: string): number | null {
     client: Client;
     /** Where SSDP announces the router; null when nothing answers a search. */
     announce(location: string | null): void;
+    /** The SERVER line SSDP answers carry from now on; null sends none. */
+    announceServer(line: string | null): void;
     /** The one origin that accepts connections; null when none does. */
     serve(origin: string | null): void;
     /** Announce and serve the same new location. */
@@ -2973,6 +3004,7 @@ function getSoapFaultCode(xml: string): number | null {
     const fakePost = axiosModule.post;
     const realSend = FakeSocket.prototype.send;
     let announced: string | null = FIRST_LOCATION;
+    let announcedServer: string | null = `SERVER: ${SSDP_SERVER}`;
     let served: string | null = FIRST_ORIGIN;
     const reached: MovingGateway["reached"] = [];
     const sent: MovingGateway["sent"] = [];
@@ -2981,7 +3013,8 @@ function getSoapFaultCode(xml: string): number | null {
     FakeSocket.prototype.send = function (this: FakeSocket, ...args: Parameters<FakeSocket["send"]>) {
       realSend.apply(this, args);
       const location = announced;
-      if (location) setImmediate(() => this.deliver(ssdpResponse(GATEWAY_SEARCH_TARGET, location)));
+      const server = announcedServer;
+      if (location) setImmediate(() => this.deliver(ssdpResponse(GATEWAY_SEARCH_TARGET, location, server)));
     };
     const route = (url: string): string => {
       const { origin } = new URL(url);
@@ -3009,6 +3042,7 @@ function getSoapFaultCode(xml: string): number | null {
       await fn({
         client,
         announce: (location) => { announced = location; },
+        announceServer: (line) => { announcedServer = line; },
         serve: (origin) => { served = origin; },
         moveTo: (location) => {
           announced = location;
@@ -3040,6 +3074,20 @@ function getSoapFaultCode(xml: string): number | null {
       assertEqual(g.searches(), 2, "the router is searched for once more");
       const last = g.reached[g.reached.length - 1];
       assertEqual(last.origin, SECOND_ORIGIN, "the request is sent again to the new location");
+    });
+  });
+
+  await test("a gateway found again reports the SSDP SERVER of the answer that found it again", async () => {
+    await withMovingGateway(async (g) => {
+      g.announceServer("SERVER: before the restart");
+      assertEqual((await (await g.client.getGateway()).getDevice())!.ssdpServer, "before the restart", "first");
+      g.announceServer("SERVER: after the restart");
+      g.moveTo(SECOND_LOCATION);
+      await g.client.getPublicIp();
+
+      const info = await g.client.getGateway();
+      assertEqual(info.gateway.description, SECOND_LOCATION, "the gateway found again");
+      assertEqual((await info.getDevice())!.ssdpServer, "after the restart", "ssdpServer");
     });
   });
 
@@ -5472,6 +5520,79 @@ function getSoapFaultCode(xml: string): number | null {
         const info = await within(new Device(server.url).getDeviceInfo(), 2000, "the device info");
         assert(info !== null, "the device info resolves");
         assertEqual(info!.friendlyName, "AT&T", "friendlyName");
+      }
+    );
+  });
+
+  await test("the description's Server header is read however the response is framed", async () => {
+    const framings: [string, (path: string, socket: net.Socket) => void][] = [
+      ["held open after the document", sendAndHold],
+      ["closed after the document", (path, socket) => socket.end(CLOSE_FRAMED_HEAD + documentAt(path))],
+      [
+        "sized by a Content-Length",
+        (path, socket) => {
+          const body = documentAt(path);
+          socket.write(
+            "HTTP/1.1 200 OK\r\nServer: LINUX/2.4 UPnP/1.0 BRCM400/1.0\r\nContent-Type: text/xml\r\n" +
+              `Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`
+          );
+        },
+      ],
+      [
+        "chunked",
+        (path, socket) => {
+          const body = Buffer.from(documentAt(path));
+          socket.write(
+            "HTTP/1.1 200 OK\r\nServer: LINUX/2.4 UPnP/1.0 BRCM400/1.0\r\nTransfer-Encoding: chunked\r\n\r\n" +
+              `${body.length.toString(16)}\r\n${body}\r\n0\r\n\r\n`
+          );
+        },
+      ],
+    ];
+    for (const [framing, answer] of framings) {
+      await withDocumentServer(answer, async (server) => {
+        const info = await within(new Device(server.url).getDeviceInfo(), 2000, framing);
+        assertEqual(info!.httpServer, "LINUX/2.4 UPnP/1.0 BRCM400/1.0", `httpServer, ${framing}`);
+      });
+    }
+  });
+
+  await test("a description served with no Server header reports httpServer null", async () => {
+    await withDocumentServer(
+      (path, socket) =>
+        socket.end("HTTP/1.0 200 OK\r\nContent-Type: text/xml\r\nConnection: Close\r\n\r\n" + documentAt(path)),
+      async (server) => {
+        const info = await within(new Device(server.url).getDeviceInfo(), 2000, "the device info");
+        assertEqual(info!.httpServer, null, "httpServer");
+      }
+    );
+  });
+
+  await test("a description served with two Server headers reports the first", async () => {
+    await withDocumentServer(
+      (path, socket) =>
+        socket.end(
+          "HTTP/1.0 200 OK\r\nServer: the first\r\nServer: the second\r\nConnection: Close\r\n\r\n" + documentAt(path)
+        ),
+      async (server) => {
+        const info = await within(new Device(server.url).getDeviceInfo(), 2000, "the device info");
+        assertEqual(info!.httpServer, "the first", "httpServer");
+      }
+    );
+  });
+
+  await test("over a real connection httpServer is the description's Server header, not the SCPD's", async () => {
+    await withDocumentServer(
+      (path, socket) =>
+        socket.end(
+          `HTTP/1.0 200 OK\r\nServer: ${path === "/WANIPCn.xml" ? "the SCPD's server" : "the description's server"}\r\n` +
+            "Connection: Close\r\n\r\n" + documentAt(path)
+        ),
+      async (server) => {
+        const device = new Device(server.url);
+        assert((await within(device.getCapabilities(), 2000, "the SCPD")) !== null, "the SCPD was read first");
+        const info = await within(device.getDeviceInfo(), 2000, "the device info");
+        assertEqual(info!.httpServer, "the description's server", "httpServer");
       }
     );
   });

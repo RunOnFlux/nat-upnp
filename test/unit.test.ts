@@ -1640,7 +1640,29 @@ function getSoapFaultCode(xml: string): number | null {
     }
   });
 
-  for (const index of [-1, 1.5, 65536, "0x1", "1a", NaN] as unknown[]) {
+  for (const [index, sent] of [[65535, "65535"], ["12", "12"]] as const) {
+    await test(`getMappingAt asks the router for the index ${JSON.stringify(index)}`, async () => {
+      const restore = installFakeRouter("opnsense");
+      const fakePost = axiosModule.post;
+      const asked: string[] = [];
+      (axiosModule as any).post = async (url: string, body: string, config?: AxiosRequestConfig<string>) => {
+        const at = /<NewPortMappingIndex>([^<]*)<\/NewPortMappingIndex>/.exec(body)?.[1];
+        if (at !== undefined) asked.push(at);
+        return fakePost(url, body, config);
+      };
+      const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+      try {
+        await client.getMappingAt({ index: index as number });
+        assertEqual(JSON.stringify(asked), JSON.stringify([sent]), `one request, for index ${sent}`);
+      } finally {
+        client.close();
+        (axiosModule as any).post = fakePost;
+        restore();
+      }
+    });
+  }
+
+  for (const index of [-1, 1.5, 65536, "0x1", "1a", "12 ", NaN] as unknown[]) {
     await test(`getMappingAt refuses the index ${JSON.stringify(index)} before asking the router`, async () => {
       const restore = installFakeRouter("opnsense");
       const fakePost = axiosModule.post;

@@ -211,6 +211,27 @@ export class Client implements IClient {
     return this.onGateway(signal, (info) => this.walkMappings(info, options));
   }
 
+  /**
+   * The router's mapping at `index` of its table, read with one
+   * GetGenericPortMappingEntry, or null where the table ends. A caller reads
+   * the table an entry at a time from 0 until null, sending other requests
+   * between entries as it likes. The table can change between two reads: an
+   * entry added or removed meanwhile shifts the ones after it, so a read can
+   * skip an entry or give one again.
+   *
+   * The table ends as getMappings' walk ends: at an index the router answers
+   * with any fault but one about the action itself, which throws, as does no
+   * answer.
+   */
+  public async getMappingAt(options: GetMappingAtOpts): Promise<Mapping | null> {
+    const { signal } = options;
+    const index = validIndex(options.index);
+    return this.onGateway(signal, async (info) => {
+      const localAddress = await untilAborted(info.getLocalAddress(), signal);
+      return this.entryAt(info, index, localAddress, signal);
+    });
+  }
+
   private async walkMappings(info: UpnpInfo, options: GetMappingOpts): Promise<Mapping[]> {
     const { signal } = options;
     const localAddress = await untilAborted(info.getLocalAddress(), signal);
@@ -229,32 +250,8 @@ export class Client implements IClient {
           `Mapping table walk passed ${MAX_MAPPINGS} entries without an end-of-table answer`
         );
       }
-      let data: RawResponse;
-      try {
-        data = await info.gateway.run(
-          "GetGenericPortMappingEntry",
-          [["NewPortMappingIndex", i]],
-          { signal }
-        );
-      } catch (err) {
-        // A fault is the router answering about that index, and the first
-        // index it has no entry for ends the table, whatever the code: 713
-        // and 714 are the standard's, MikroTik and TP-Link/Omada say 402,
-        // Mercusys 501. Only a fault about the action itself - 401 Invalid
-        // Action, 602 Not Implemented, 606 Not Authorized - says the router
-        // will not list its table at all, and is thrown.
-        //
-        // No answer, or one that is not a SOAP reply, is the router failing,
-        // not the table ending, and is thrown: a dead socket is not an empty
-        // router.
-        if (err instanceof UpnpError && !ACTION_REFUSALS.has(err.code)) break;
-        throw err;
-      }
-
-      const res = findResponseKey(data, "GetGenericPortMappingEntryResponse");
-      if (!res) throw new Error("Incorrect response for GetGenericPortMappingEntry");
-
-      const mapping = parseMapping(res, localAddress);
+      const mapping = await this.entryAt(info, i, localAddress, signal);
+      if (!mapping) break;
 
       // Only confirmed-local mappings pass the filter: null is not confirmation.
       if (options.local && !mapping.local) continue;
@@ -264,6 +261,41 @@ export class Client implements IClient {
     }
 
     return results;
+  }
+
+  /** One GetGenericPortMappingEntry: the entry at `index`, or null where the table ends. */
+  private async entryAt(
+    info: UpnpInfo,
+    index: number,
+    localAddress: string,
+    signal?: AbortSignal
+  ): Promise<Mapping | null> {
+    let data: RawResponse;
+    try {
+      data = await info.gateway.run(
+        "GetGenericPortMappingEntry",
+        [["NewPortMappingIndex", index]],
+        { signal }
+      );
+    } catch (err) {
+      // A fault is the router answering about that index, and the first
+      // index it has no entry for ends the table, whatever the code: 713
+      // and 714 are the standard's, MikroTik and TP-Link/Omada say 402,
+      // Mercusys 501. Only a fault about the action itself - 401 Invalid
+      // Action, 602 Not Implemented, 606 Not Authorized - says the router
+      // will not list its table at all, and is thrown.
+      //
+      // No answer, or one that is not a SOAP reply, is the router failing,
+      // not the table ending, and is thrown: a dead socket is not an empty
+      // router.
+      if (err instanceof UpnpError && !ACTION_REFUSALS.has(err.code)) return null;
+      throw err;
+    }
+
+    const res = findResponseKey(data, "GetGenericPortMappingEntryResponse");
+    if (!res) throw new Error("Incorrect response for GetGenericPortMappingEntry");
+
+    return parseMapping(res, localAddress);
   }
 
   /**
@@ -777,6 +809,18 @@ function internalClientFor(host: string | undefined, localAddress: string): stri
  * truncating firmware maps a lease the caller never asked for and answers
  * success, and nothing read back can reveal it.
  */
+/**
+ * A table index is ui2 on the wire, and gets the port treatment: a firmware
+ * that truncates it answers about an entry the caller never asked for.
+ */
+function validIndex(value: unknown): number {
+  const index = typeof value === "string" && /^\d+$/.test(value) ? Number(value) : value;
+  if (typeof index !== "number" || !Number.isInteger(index) || index < 0 || index > 65535) {
+    throw new Error(`index must be an integer between 0 and 65535, got ${JSON.stringify(value)}`);
+  }
+  return index;
+}
+
 function validTtl(value: unknown, what: string): number {
   const ttl = typeof value === "string" && /^\d+$/.test(value) ? Number(value) : value;
   if (typeof ttl !== "number" || !Number.isInteger(ttl) || ttl < 0 || ttl > 4294967295) {
@@ -919,6 +963,10 @@ export interface GetMappingOpts extends RequestOpts {
   description?: RegExp | string;
 }
 
+export interface GetMappingAtOpts extends RequestOpts {
+  index: number;
+}
+
 export interface GetSpecificMappingOpts extends RequestOpts {
   public: number;
   protocol?: string;
@@ -959,6 +1007,7 @@ export interface IClient {
   removeMapping(options: DeletePortMappingOpts): Promise<RawResponse>;
   removeMappingRange(options: DeleteMappingRangeOpts): Promise<RawResponse>;
   getMappings(options?: GetMappingOpts): Promise<Mapping[]>;
+  getMappingAt(options: GetMappingAtOpts): Promise<Mapping | null>;
   getMappingRange(options: GetMappingRangeOpts): Promise<Mapping[]>;
   getMapping(options: GetSpecificMappingOpts): Promise<Mapping | null>;
   getStatusInfo(options?: RequestOpts): Promise<StatusInfo>;

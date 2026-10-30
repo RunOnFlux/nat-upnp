@@ -14,7 +14,7 @@ import {
   untilAborted,
 } from "../src/nat-upnp/device";
 import { Device, type DeviceOpts, KEEP_ALIVE_HINT_MARGIN_MS, KEPT_CONNECTION_IDLE_MS, keptIdleLimit, upnpAgent } from "../src/nat-upnp/device";
-import { Client, canonicalDescription } from "../src/nat-upnp/client";
+import { Client, canonicalDescription, type Mapping } from "../src/nat-upnp/client";
 import { parseMimeHeader, Ssdp, type SsdpEmitter } from "../src/nat-upnp/ssdp";
 import { surveyedRouters } from "./router-data";
 import { installFakeDgram, FakeSocket, ssdpResponse, settle, SSDP_SERVER } from "./fake-dgram";
@@ -1531,6 +1531,161 @@ function getSoapFaultCode(xml: string): number | null {
       restore();
     }
   });
+
+  for (const router of routers) {
+    await test(`${router}: getMappingAt reads the entry at an index, and null where the table ends`, async () => {
+      const expected = expectedGenericEntry[router];
+      const [first, end] = await withRouter(router, async (c) => [
+        await c.getMappingAt({ index: 0 }),
+        await c.getMappingAt({ index: 1 }),
+      ]);
+      assert(first !== null, `${router}: expected the entry at index 0`);
+      assertEqual(first!.public.port, expected.public, `${router}: public port`);
+      assertEqual(first!.private.host, expected.host, `${router}: internal host`);
+      assertEqual(first!.private.port, expected.private, `${router}: internal port`);
+      assertEqual(first!.protocol, expected.protocol, `${router}: protocol`);
+      assertEqual(first!.description, expected.description, `${router}: description`);
+      assertEqual(first!.local, expected.host === LOCAL_ADDRESS, `${router}: local flag`);
+      assertEqual(end, null, `${router}: index 1 ends the table`);
+    });
+  }
+
+  await test("getMappingAt reads a multi-entry table an entry at a time, as getMappings lists it", async () => {
+    const restore = installFakeRouter("opnsense");
+    setV1Table([
+      { external: 16137, internal: 16137, host: "192.168.1.60", description: "Flux_One", ttl: 3600 },
+      { external: 16147, internal: 9090, host: "192.168.1.61", description: "Flux_Two", ttl: 60 },
+      { external: 25565, internal: 25565, host: "192.168.1.62", description: "Flux_Three", ttl: 0, protocol: "UDP" },
+    ]);
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+    const row = (m: Mapping) => `${m.public.port}:${m.private.host}:${m.private.port}:${m.protocol}:${m.description}:${m.ttl}`;
+    try {
+      const entries: Mapping[] = [];
+      for (let index = 0; index < 10; index++) {
+        const entry = await client.getMappingAt({ index });
+        if (!entry) break;
+        entries.push(entry);
+      }
+      assertEqual(entries.length, 3, "three entries, then the end of the table");
+      assertEqual(
+        JSON.stringify(entries.map(row)),
+        JSON.stringify((await client.getMappings()).map(row)),
+        "the same rows as the walk"
+      );
+    } finally {
+      setV1Table(null);
+      client.close();
+      restore();
+    }
+  });
+
+  await test("getMappingAt asks the router for the index it is given, once", async () => {
+    const restore = installFakeRouter("opnsense");
+    const fakePost = axiosModule.post;
+    const asked: string[] = [];
+    (axiosModule as any).post = async (url: string, body: string, config?: AxiosRequestConfig<string>) => {
+      const index = /<NewPortMappingIndex>(\d+)<\/NewPortMappingIndex>/.exec(body)?.[1];
+      if (index !== undefined) asked.push(index);
+      return fakePost(url, body, config);
+    };
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+    try {
+      await client.getMappingAt({ index: 7 });
+      assertEqual(JSON.stringify(asked), JSON.stringify(["7"]), "one request, for index 7");
+    } finally {
+      client.close();
+      (axiosModule as any).post = fakePost;
+      restore();
+    }
+  });
+
+  await test("getMappingAt answers null at an index the router faults, whatever the code", async () => {
+    const entry = await withWalkIndexAnswering(1, walkFault(501, "Invalid NewPortMappingIndex"), (c) =>
+      c.getMappingAt({ index: 1 })
+    );
+    assertEqual(entry, null, "501 ends the table");
+  });
+
+  for (const [code, name] of [
+    [401, "Invalid Action"],
+    [602, "Optional Action Not Implemented"],
+    [606, "Action not authorized"],
+  ] as const) {
+    await test(`getMappingAt throws a ${code}: the router will not list its table`, async () => {
+      await expectUpnpError(
+        withWalkIndexAnswering(0, walkFault(code, name), (c) => c.getMappingAt({ index: 0 })),
+        code,
+        `getMappingAt answered ${code}`
+      );
+    });
+  }
+
+  await test("getMappingAt does not read a dead socket as the end of the table", async () => {
+    const err = await expectThrow(
+      () => withBroken("transport", (c) => c.getMappingAt({ index: 0 })),
+      "getMappingAt on a dead socket"
+    );
+    assertEqual((err as Error).message, "socket hang up");
+  });
+
+  await test("getMappingAt marks the machine's own mapping local", async () => {
+    const restore = installFakeRouter("opnsense");
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: "172.16.32.143" });
+    try {
+      const entry = await client.getMappingAt({ index: 0 });
+      assertEqual(entry?.local, true, "the machine's own mapping is local");
+    } finally {
+      client.close();
+      restore();
+    }
+  });
+
+  for (const [index, sent] of [[65535, "65535"], ["12", "12"]] as const) {
+    await test(`getMappingAt asks the router for the index ${JSON.stringify(index)}`, async () => {
+      const restore = installFakeRouter("opnsense");
+      const fakePost = axiosModule.post;
+      const asked: string[] = [];
+      (axiosModule as any).post = async (url: string, body: string, config?: AxiosRequestConfig<string>) => {
+        const at = /<NewPortMappingIndex>([^<]*)<\/NewPortMappingIndex>/.exec(body)?.[1];
+        if (at !== undefined) asked.push(at);
+        return fakePost(url, body, config);
+      };
+      const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+      try {
+        await client.getMappingAt({ index: index as number });
+        assertEqual(JSON.stringify(asked), JSON.stringify([sent]), `one request, for index ${sent}`);
+      } finally {
+        client.close();
+        (axiosModule as any).post = fakePost;
+        restore();
+      }
+    });
+  }
+
+  for (const index of [-1, 1.5, 65536, "0x1", "1a", "12 ", NaN] as unknown[]) {
+    await test(`getMappingAt refuses the index ${JSON.stringify(index)} before asking the router`, async () => {
+      const restore = installFakeRouter("opnsense");
+      const fakePost = axiosModule.post;
+      let posts = 0;
+      (axiosModule as any).post = async (url: string, body: string, config?: AxiosRequestConfig<string>) => {
+        posts += 1;
+        return fakePost(url, body, config);
+      };
+      const client = new Client({ url: DESCRIPTION_URL, localAddress: LOCAL_ADDRESS });
+      try {
+        const err = await expectThrow(
+          () => client.getMappingAt({ index: index as number }),
+          `getMappingAt with ${JSON.stringify(index)}`
+        );
+        assert(/index must be an integer between 0 and 65535/.test((err as Error).message), `got: ${(err as Error).message}`);
+        assertEqual(posts, 0, "nothing sent");
+      } finally {
+        client.close();
+        (axiosModule as any).post = fakePost;
+        restore();
+      }
+    });
+  }
 
   await test("an entry with no internal client is local: null, not a claim", async () => {
     // "local" is a fact only when both addresses are known. A router that

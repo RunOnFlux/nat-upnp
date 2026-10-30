@@ -126,6 +126,13 @@ const all = await client.getMappings();
 const local = await client.getMappings({ local: true });
 const filtered = await client.getMappings({ description: /^Flux_/ });
 
+// One entry of the table by index (one SOAP call); null where the table ends
+for (let index = 0; ; index++) {
+  const entry = await client.getMappingAt({ index });
+  if (!entry) break;
+  // other requests can go to the router here, between two entries
+}
+
 // A string filter is matched as routers store descriptions: FRITZ!Box keeps
 // "Flux_App_web" as "Flux.App.web", and both match "Flux_App_". Compare any
 // stored description the same way with canonicalDescription():
@@ -200,6 +207,8 @@ try {
 | 729 | ConflictWithOtherMechanisms |
 
 `getMappings()` walks the table until the router answers an index with a fault, which ends the table whatever its code: 713 and 714 are the standard's, MikroTik and TP-Link/Omada answer 402, Mercusys 501. A fault about the action itself (401 Invalid Action, 602 Not Implemented, 606 Not Authorized) throws, as does an index that gets no answer or an answer that is not a SOAP reply, so the caller never receives a partial listing as a complete one.
+
+`getMappingAt({ index })` reads one entry by the same rules: `null` at an index the table ends at, and a throw for a fault about the action or no answer. The table can change between two calls, and an entry added or removed meanwhile shifts the ones after it, so a caller reading it an entry at a time can skip an entry or read one twice.
 
 ## Connections
 

@@ -206,6 +206,37 @@ setupTest("NAT-UPNP/Client", (opts) => {
     return passed;
   });
 
+  opts.run("Read the table an entry at a time, as the walk lists it", async () => {
+    const row = (m: Mapping) => `${m.public.port}:${m.private.host}:${m.private.port}:${m.protocol}:${m.description}`;
+    const entries: Mapping[] = [];
+    for (let index = 0; index < 10000; index++) {
+      const entry = await client.getMappingAt({ index });
+      if (!entry) break;
+      entries.push(entry);
+    }
+    const walked = await client.getMappings();
+    const same = JSON.stringify(entries.map(row)) === JSON.stringify(walked.map(row));
+    const allFound = globalPort.every((port) => entries.some((m) => m.public.port === port));
+    console.log("  Entries:", entries.length, "Walk:", walked.length, "same rows:", same, "all five found:", allFound);
+    return same && allFound;
+  });
+
+  opts.run("Other requests go to the router between two entry reads", async () => {
+    const first = await client.getMappingAt({ index: 0 });
+    const status = await client.getStatusInfo();
+    const looked = await client.getMapping({ public: globalPort[0] });
+    const second = await client.getMappingAt({ index: 1 });
+    console.log("  Entry 0:", first?.public.port, "status:", status.connectionStatus, "lookup:", looked?.public.port, "entry 1:", second?.public.port);
+    return first !== null && second !== null && looked?.public.port === globalPort[0];
+  });
+
+  opts.run("An index past the table's end answers null", async () => {
+    const walked = await client.getMappings();
+    const past = await client.getMappingAt({ index: walked.length });
+    console.log("  Index", walked.length, "->", past);
+    return past === null;
+  });
+
   opts.run("GetSpecificPortMappingEntry — find existing", async () => {
     const mapping = await client.getMapping({
       public: globalPort[0],

@@ -23,6 +23,7 @@ export type { SearchCallback, ISsdp, SsdpEmitter } from "./nat-upnp/ssdp";
 export { Client, UpnpInfo, canonicalDescription } from "./nat-upnp/client";
 export type {
   GetMappingOpts,
+  GetMappingAtOpts,
   GetMappingRangeOpts,
   GetSpecificMappingOpts,
   Mapping,

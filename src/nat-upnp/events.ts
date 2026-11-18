@@ -36,7 +36,7 @@ export interface SubscriptionOpts {
 /** How the listener answers a NOTIFY, as GENA requires. */
 const NOTIFY_ANSWER = Object.freeze({
   OK: 200,
-  /** No NT, NTS or decimal SEQ, or a body that is not XML. */
+  /** No NT, NTS or decimal SEQ, or a body that is not a propertyset. */
   BAD_REQUEST: 400,
   NOT_NOTIFY: 405,
   /** A wrong NT or NTS, a SID that is not this subscription's, or one early NOTIFY too many. */
@@ -86,16 +86,17 @@ export interface Subscription {
  * lost.
  *
  * The listener answers the gateway as GENA requires: 400 for a NOTIFY without NT, NTS or
- * a decimal SEQ, or with a body that is not XML; 412 for a wrong NT or NTS, or, once the
- * SID is known, a SID that is not this subscription's; 413 for a body over 64 KiB. Until
- * the SID is known a NOTIFY is answered 200 and held, at most 16 (412 beyond), and those
- * with another SID are dropped. A connection from any other address is closed unanswered.
+ * a decimal SEQ, or with a body that is not a propertyset; 412 for a wrong NT or NTS, or,
+ * once the SID is known, a SID that is not this subscription's; 413 for a body over
+ * 64 KiB. Until the SID is known a NOTIFY is answered 200 and held, at most 16 (412
+ * beyond), and those with another SID are dropped. A connection from any other address
+ * is closed unanswered.
  */
 export class Subscription extends EventEmitter {
   private sidValue = "";
   private granted: number | null = null;
-  private renewTimer: NodeJS.Timeout | null = null;
-  private lapseTimer: NodeJS.Timeout | null = null;
+  private renewTimer: NodeJS.Timeout | undefined;
+  private lapseTimer: NodeJS.Timeout | undefined;
   private retryMs = MIN_RETRY_MS;
   private lastRenewalError: Error | null = null;
   private early: Array<{ sid: string; event: UpnpEvent }> = [];
@@ -142,10 +143,8 @@ export class Subscription extends EventEmitter {
     }
 
     if (failure !== null) {
-      sub.ended = true;
       const sids = new Set(sub.early.map((e) => e.sid));
       if (granted) sids.add(granted.sid);
-      sub.early = [];
       await Promise.all([...[...sids].map((sid) => requests.unsubscribe(sid).catch(() => {})), sub.shutDown()]);
       throw (failure as { reason: unknown }).reason;
     }
@@ -196,7 +195,6 @@ export class Subscription extends EventEmitter {
   }
 
   private async renew(): Promise<void> {
-    if (this.ended) return;
     try {
       const granted = await this.requests.renew(this.sidValue, this.opts.timeout);
       if (!this.ended) this.grant(granted);
@@ -210,10 +208,10 @@ export class Subscription extends EventEmitter {
   }
 
   private clearTimers(): void {
-    if (this.renewTimer) clearTimeout(this.renewTimer);
-    if (this.lapseTimer) clearTimeout(this.lapseTimer);
-    this.renewTimer = null;
-    this.lapseTimer = null;
+    clearTimeout(this.renewTimer);
+    clearTimeout(this.lapseTimer);
+    this.renewTimer = undefined;
+    this.lapseTimer = undefined;
   }
 
   private lose(reason: Error): void {
@@ -253,10 +251,11 @@ export class Subscription extends EventEmitter {
   }
 
   private receive(req: http.IncomingMessage, res: http.ServerResponse): void {
+    // Framed by Content-Length: an empty answer is otherwise sent chunked.
+    const reply = (status: number): void => void res.writeHead(status, { "Content-Length": "0" }).end();
     if (req.method !== "NOTIFY") {
       req.resume();
-      res.writeHead(NOTIFY_ANSWER.NOT_NOTIFY).end();
-      return;
+      return reply(NOTIFY_ANSWER.NOT_NOTIFY);
     }
     const chunks: Buffer[] = [];
     let size = 0;
@@ -265,13 +264,12 @@ export class Subscription extends EventEmitter {
       if (size <= MAX_NOTIFY_BYTES) chunks.push(chunk);
     });
     req.on("end", () => {
-      const reply = (status: number): void => void res.writeHead(status, { "Content-Length": "0" }).end();
-      const nt = req.headers["nt"];
-      const nts = req.headers["nts"];
-      const sid = String(req.headers["sid"] ?? "").trim();
-      const seq = String(req.headers["seq"] ?? "").trim();
+      // Node trims each value, and joins a repeated header into one string.
+      const { nt, nts, sid, seq } = req.headers as Record<string, string | undefined>;
       if (size > MAX_NOTIFY_BYTES) return reply(NOTIFY_ANSWER.TOO_LARGE);
-      if (nt === undefined || nts === undefined || !/^\d+$/.test(seq)) return reply(NOTIFY_ANSWER.BAD_REQUEST);
+      if (nt === undefined || nts === undefined || seq === undefined || !/^\d+$/.test(seq)) {
+        return reply(NOTIFY_ANSWER.BAD_REQUEST);
+      }
       if (nt !== GENA.NT || nts !== GENA.NTS || !sid) return reply(NOTIFY_ANSWER.PRECONDITION_FAILED);
       const properties = parseProperties(Buffer.concat(chunks).toString("utf8"));
       if (!properties) return reply(NOTIFY_ANSWER.BAD_REQUEST);
@@ -288,24 +286,27 @@ export class Subscription extends EventEmitter {
   }
 }
 
-/** The variables of an event's propertyset; null when the body is not XML. */
+/** The variables of an event's propertyset; null when the body is not a propertyset. */
 function parseProperties(body: string): Record<string, string> | null {
   if (XMLValidator.validate(body) !== true) return null;
-  let doc: any;
+  let set: any;
   try {
-    doc = xmlParser.parse(body);
+    set = xmlParser.parse(body).propertyset;
   } catch {
     return null; // the parser refuses some names outright, e.g. __proto__
   }
+  if (set === undefined) return null;
   const properties: Record<string, string> = Object.create(null);
-  const list = doc?.propertyset?.property;
-  for (const property of Array.isArray(list) ? list : list === undefined ? [] : [list]) {
+  // The parser gives "" for an empty element, a string for text, an object for one
+  // property and an array for several.
+  const list = set.property;
+  for (const property of Array.isArray(list) ? list : [list]) {
     if (property === null || typeof property !== "object") continue;
     for (const [name, value] of Object.entries(property)) {
       if (name.startsWith("@_") || name === "#text") continue;
       // A variable named twice in one property: the last one stands.
       const last = Array.isArray(value) ? value[value.length - 1] : value;
-      properties[name] = decodeXmlEntities(fieldValue(last)).trim();
+      properties[name] = decodeXmlEntities(fieldValue(last));
     }
   }
   return properties;

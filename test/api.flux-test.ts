@@ -6,6 +6,8 @@ import {
   UpnpError,
   CapabilityUnavailableError,
   UnsupportedActionError,
+  SubscriptionError,
+  UpnpEvent,
 } from "../src";
 import { execSync } from "node:child_process";
 
@@ -624,6 +626,57 @@ setupTest("NAT-UPNP/Client", (opts) => {
   // ==========================================
   // SSDP bypass and caching
   // ==========================================
+
+  // ==========================================
+  // Events
+  // ==========================================
+
+  /** Resolves once `events` holds at least `n`, or after `ms`. */
+  async function eventsBy(events: UpnpEvent[], n: number, ms: number): Promise<boolean> {
+    const deadline = Date.now() + ms;
+    while (events.length < n && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+    return events.length >= n;
+  }
+
+  opts.run("Events — the subscription's first NOTIFY, then one each for a mapping added and removed", async () => {
+    const port = ~~(Math.random() * 10000 + 40000);
+    const sub = await client.subscribe({ timeout: 300 });
+    const events: UpnpEvent[] = [];
+    sub.on("event", (e) => events.push(e));
+    try {
+      console.log("  SID:", sub.sid, "timeout:", sub.timeout);
+      if (!(await eventsBy(events, 1, 5000))) return false;
+      const before = Number(events[0].properties.PortMappingNumberOfEntries);
+      await client.createMapping({ public: port, private: port, ttl: 0, description: "nat-upnp events" });
+      if (!(await eventsBy(events, 2, 5000))) return false;
+      await client.removeMapping({ public: port });
+      if (!(await eventsBy(events, 3, 5000))) return false;
+      console.log("  Events:", events.map((e) => `${e.seq}:${e.properties.PortMappingNumberOfEntries}`).join(" "));
+      return (
+        events.map((e) => e.seq).join() === "0,1,2" &&
+        Number(events[1].properties.PortMappingNumberOfEntries) === before + 1 &&
+        Number(events[2].properties.PortMappingNumberOfEntries) === before
+      );
+    } finally {
+      await removeQuietly(port);
+      await sub.close();
+    }
+  });
+
+  opts.run("Events — a renewal after UNSUBSCRIBE is refused 412", async () => {
+    const info = await client.getGateway();
+    const sub = await client.subscribe({ timeout: 300 });
+    await info.gateway.unsubscribe(sub.sid);
+    try {
+      await info.gateway.renewSubscription(sub.sid);
+      return false;
+    } catch (err) {
+      console.log("  Renewal answered:", err instanceof SubscriptionError ? err.status : err);
+      return err instanceof SubscriptionError && err.status === 412;
+    } finally {
+      await sub.close();
+    }
+  });
 
   opts.run("Cache gateway and run without SSDP", async () => {
     const upnpInfo = await client.getGateway();

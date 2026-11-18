@@ -213,18 +213,21 @@ export const GENA = Object.freeze({
   NTS: "upnp:propchange",
   TIMEOUT_PREFIX: "Second-",
   INFINITE: "infinite",
+  /** The answer to a renewal or UNSUBSCRIBE for a SID the gateway does not hold. */
+  SID_NOT_HELD: 412,
 } as const);
 
 const GRANTED_SECONDS = new RegExp(`^${GENA.TIMEOUT_PREFIX}(\\d+)$`, "i");
+const GRANTED_INFINITE = new RegExp(`^(?:${GENA.TIMEOUT_PREFIX})?${GENA.INFINITE}$`, "i");
 
 /**
- * The lifetime a gateway granted: "Second-1800" → 1800, "infinite" → null. TIMEOUT is
- * required in the answer, and one missing or unreadable is taken to grant what was asked:
- * only "infinite" itself means a subscription that never lapses.
+ * The lifetime a gateway granted: "Second-1800" → 1800, "Second-infinite" (or a bare
+ * "infinite") → null. TIMEOUT is required in the answer, and one missing or unreadable is
+ * taken to grant what was asked.
  */
 function grantedTimeout(value: string | undefined, asked: number | null): number | null {
   if (value === undefined) return asked;
-  if (value.toLowerCase() === GENA.INFINITE) return null;
+  if (GRANTED_INFINITE.test(value)) return null;
   const match = GRANTED_SECONDS.exec(value);
   return match ? Number(match[1]) : asked;
 }
@@ -638,17 +641,23 @@ export class Device implements IDevice {
     signal?.throwIfAborted();
     const info = await untilAborted(this.resolveService(), signal);
     if (!info.eventSubURL) throw new UnsupportedActionError(`${method} (no eventSubURL)`);
-    const response = await axios.request({
-      ...axiosDefaults,
-      // A fresh connection each time: these are minutes apart, and a kept one
-      // would be past the router's idle limit.
-      httpAgent: genaAgent,
-      url: info.eventSubURL,
-      method,
-      headers,
-      signal,
-      validateStatus: () => true,
-    });
+    let response;
+    try {
+      response = await axios.request({
+        ...axiosDefaults,
+        // A fresh connection each time: these are minutes apart, and a kept one
+        // would be past the router's idle limit.
+        httpAgent: genaAgent,
+        url: info.eventSubURL,
+        method,
+        headers,
+        signal,
+        validateStatus: () => true,
+      });
+    } catch (err) {
+      if (signal?.aborted) throw signal.reason;
+      throw err;
+    }
     if (response.status !== 200) throw new SubscriptionError(method, response.status);
     // Node trims each value, and joins a repeated header into one string. Only a first
     // SUBSCRIBE goes without a SID of its own to fall back on.

@@ -3327,6 +3327,28 @@ function getSoapFaultCode(xml: string): number | null {
     }, { cacheGateway: true, localAddress: "127.0.0.1" });
   });
 
+  await test("a renewal left unanswered after the cache moved on keeps the gateway found since", async () => {
+    await withMovingGateway(async (g) => {
+      setGenaAnswer((req) => ({ status: 200, headers: { sid: req.headers.SID ?? "uuid:a", timeout: "Second-2" } }));
+      let refused = false;
+      const restore = routingGena(() => refused);
+      try {
+        const sub = await g.client.subscribe();
+        g.moveTo(SECOND_LOCATION);
+        await g.client.getPublicIp(); // the first router is gone: the second is found and cached
+        const searches = g.searches();
+        refused = true;
+        await new Promise((r) => setTimeout(r, 1300)); // the first router's renewal goes unanswered
+        refused = false;
+        await sub.close();
+        await g.client.getPublicIp();
+        assertEqual(g.searches(), searches, "no new search: the second router is still cached");
+      } finally {
+        restore();
+      }
+    }, { cacheGateway: true, localAddress: "127.0.0.1" });
+  });
+
   await test("a subscription's requests all go to the router it subscribed, though a new search finds another", async () => {
     await withMovingGateway(async (g) => {
       setGenaAnswer((req) => ({ status: 200, headers: { sid: req.headers.SID ?? "uuid:a", timeout: "Second-2" } }));

@@ -3,6 +3,7 @@ export {
   UpnpError,
   CapabilityUnavailableError,
   UnsupportedActionError,
+  SubscriptionError,
   UPNP_ERROR_CODES,
   ONLY_PERMANENT_LEASES,
   xmlParser,
@@ -15,7 +16,12 @@ export type {
   ResolvedService,
   RawService,
   RawDevice,
+  EventSubscription,
+  SubscribeOpts,
 } from "./nat-upnp/device";
+
+export { EventListener } from "./nat-upnp/events";
+export type { UpnpEvent, EventListenerOpts } from "./nat-upnp/events";
 
 export { Ssdp } from "./nat-upnp/ssdp";
 export type { SearchCallback, ISsdp, SsdpEmitter } from "./nat-upnp/ssdp";

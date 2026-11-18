@@ -255,7 +255,7 @@ function v2Response(action: string): string | null {
  * The URLs a router's own description advertises, resolved the way the spec
  * says: against <URLBase> when present, else against the description URL.
  */
-function advertisedUrls(rootdesc: string): { scpd: Set<string>; control: Set<string> } {
+function advertisedUrls(rootdesc: string): { scpd: Set<string>; control: Set<string>; event: Set<string> } {
   // `||`, not `??`: TP-Link and Omada ship an empty <URLBase></URLBase>,
   // which counts as absent.
   const base = rootdesc.match(/<URLBase>([^<]*)<\/URLBase>/)?.[1] || DESCRIPTION_URL;
@@ -266,8 +266,26 @@ function advertisedUrls(rootdesc: string): { scpd: Set<string>; control: Set<str
     }
     return urls;
   };
-  return { scpd: collect("SCPDURL"), control: collect("controlURL") };
+  return { scpd: collect("SCPDURL"), control: collect("controlURL"), event: collect("eventSubURL") };
 }
+
+/** A SUBSCRIBE or UNSUBSCRIBE the fake router received. */
+export interface GenaRequest {
+  method: string;
+  url: string;
+  headers: Record<string, string>;
+}
+export const genaRequests: GenaRequest[] = [];
+
+/** How the fake router answers SUBSCRIBE and UNSUBSCRIBE; the default grants every one. */
+export let genaAnswer: (req: GenaRequest) => { status: number; headers?: Record<string, string> } = (req) => ({
+  status: 200,
+  headers: { sid: req.headers.SID ?? "uuid:fake-sub-1", timeout: "Second-1800" },
+});
+export function setGenaAnswer(fn: typeof genaAnswer | null): void {
+  genaAnswer = fn ?? defaultGenaAnswer;
+}
+const defaultGenaAnswer = genaAnswer;
 
 /** Normalized form for comparing a wire URL against the advertised set. */
 function href(url: string): string | null {
@@ -292,7 +310,9 @@ function href(url: string): string | null {
 export function installFakeRouter(router: string, breakage?: Breakage): () => void {
   const realGet = axios.get;
   const realPost = axios.post;
+  const realRequest = axios.request;
   requests.length = 0;
+  genaRequests.length = 0;
 
   const rootdesc = loadFixture(`${router}-rootdesc.xml`);
   const advertised = advertisedUrls(rootdesc);
@@ -303,6 +323,19 @@ export function installFakeRouter(router: string, breakage?: Breakage): () => vo
       return documentResponse(loadFixture(`${router}-scpd.xml`), serverHeaders.scpd);
     }
     throw new Error(`fake router: GET ${url}, which ${router}'s description never advertised`);
+  };
+
+  (axios as any).request = async (config: any) => {
+    if (!advertised.event.has(href(config.url) ?? "")) {
+      throw new Error(
+        `fake router: ${config.method} ${config.url}, which ${router}'s description never advertised as an event URL`
+      );
+    }
+    if (config.signal?.aborted) throw new axios.CanceledError();
+    const req: GenaRequest = { method: config.method, url: config.url, headers: { ...config.headers } };
+    genaRequests.push(req);
+    if (breakage === "transport") throw new Error("socket hang up");
+    return genaAnswer(req);
   };
 
   (axios as any).post = async (url: string, body: string, config: any) => {
@@ -374,6 +407,8 @@ export function installFakeRouter(router: string, breakage?: Breakage): () => vo
   return () => {
     (axios as any).get = realGet;
     (axios as any).post = realPost;
+    (axios as any).request = realRequest;
+    genaAnswer = defaultGenaAnswer;
     onRequest = null;
     serverHeaders = {};
   };

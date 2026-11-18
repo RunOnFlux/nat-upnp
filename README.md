@@ -165,6 +165,28 @@ const range = await client.getMappingRange({
 });
 ```
 
+## Events
+
+A router announces changes to its WAN connection service — among them `PortMappingNumberOfEntries`, the size of its mapping table — to subscribers (UPnP eventing, GENA). The listener receives them; the subscription tells the router where to send them:
+
+```typescript
+const listener = await client.createEventListener({ port: 49152 }); // 0 or omitted: any free port
+await listener.listen((event) => {
+  console.log(event.sid, event.seq, event.properties.PortMappingNumberOfEntries);
+});
+
+const { sid, timeout } = await client.subscribe({ callback: listener.callback }); // asks for 1800 s
+await client.renewSubscription({ sid });   // before `timeout` runs out
+await client.unsubscribe({ sid });
+await listener.close();
+```
+
+The listener binds to this host's address towards the router and accepts NOTIFYs only from the router's address, so the router must be able to reach that port: a host firewall that drops its connections drops every event. A subscription starts with a NOTIFY carrying every evented variable (`seq` 0); later ones carry what changed, numbered on. Whether an event's `sid` is a current subscription's is the caller's to check.
+
+A refusal throws `SubscriptionError` with the HTTP status: a router that rebooted, or whose subscription lapsed, answers a renewal 412, and a new subscription is needed. A SUBSCRIBE answered without a SID is refused the same way. A service whose description gives no event URL throws `UnsupportedActionError`.
+
+Routers that describe eventing do not all deliver it. Across the Flux fleet some answer SUBSCRIBE without a SID, some send the first NOTIFY and none after, and most signal only changes to the table's size, not a mapping replaced at the same size. A caller that relies on events should confirm a change of its own brings one, and still read the table now and then.
+
 ## SSDP Bypass
 
 If you already know the router's UPnP URL, skip SSDP discovery:

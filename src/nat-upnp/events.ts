@@ -76,7 +76,8 @@ export interface Subscription {
  * arms two timers: a renewal at half the lifetime, and a lapse at the whole of it. A
  * renewal the gateway refuses ends the subscription ("lost"); one it does not answer is
  * retried until the lapse fires, which ends it too. No clock is read, so a step in the
- * wall clock changes nothing. It ends on close() or "lost".
+ * wall clock changes nothing. It ends on close() or "lost", and either way UNSUBSCRIBEs
+ * unless the gateway has answered that it no longer holds the SID.
  *
  * Events are emitted on a later tick than the NOTIFY that carried them, so the gateway is
  * answered whatever a listener does, and in the order their NOTIFYs arrive: they are not
@@ -171,10 +172,8 @@ export class Subscription extends EventEmitter {
   /** Stop listening and UNSUBSCRIBE. Resolves whether or not the gateway answers. */
   async close(): Promise<void> {
     if (this.ended) return;
-    this.ended = true;
-    this.clearTimers();
     setImmediate(() => this.emit("close"));
-    await Promise.all([this.requests.unsubscribe(this.sidValue).catch(() => {}), this.shutDown()]);
+    await this.end(true);
   }
 
   private grant(granted: EventSubscription): void {
@@ -216,13 +215,18 @@ export class Subscription extends EventEmitter {
 
   private lose(reason: Error): void {
     if (this.ended) return;
-    this.ended = true;
-    this.clearTimers();
-    void this.shutDown();
+    void this.end(!(reason instanceof SubscriptionError && reason.status === GENA.SID_NOT_HELD));
     setImmediate(() => {
       this.emit("lost", reason);
       this.emit("close");
     });
+  }
+
+  /** No timer, no listener, and an UNSUBSCRIBE when the gateway may still hold the SID. */
+  private async end(held: boolean): Promise<void> {
+    this.ended = true;
+    this.clearTimers();
+    await Promise.all([held && this.requests.unsubscribe(this.sidValue).catch(() => {}), this.shutDown()]);
   }
 
   private shutDown(): Promise<void> {

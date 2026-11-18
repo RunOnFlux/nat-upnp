@@ -14,6 +14,7 @@ import Device, {
   RequestOpts,
   untilAborted,
   SubscribeOpts,
+  SubscriptionError,
   validTimeout,
 } from "./device";
 import { Subscription } from "./events";
@@ -591,14 +592,20 @@ export class Client implements IClient {
     }
     const gateway = await untilAborted(gatewayAddresses(info.gateway.description), signal);
     // Every request goes to the router found here, the one the listener accepts events
-    // from: a later discovery can find another. Not sent twice, since a repeated
-    // SUBSCRIBE would make a second subscription.
+    // from: a later discovery can find another. A request it leaves unanswered drops it
+    // from the cache, as any request does, and is not sent again: a repeated SUBSCRIBE
+    // would make a second subscription.
     const device = info.gateway;
+    const answered = <T>(request: Promise<T>, callerSignal?: AbortSignal): Promise<T> =>
+      request.catch((err) => {
+        if (!callerSignal?.aborted) this.forgetUnanswered(info, err);
+        throw err;
+      });
     const sub = await Subscription.open(
       {
-        subscribe: (callback, t) => device.subscribe(callback, { timeout: t, signal }),
-        renew: (sid, t) => device.renewSubscription(sid, { timeout: t }),
-        unsubscribe: (sid) => device.unsubscribe(sid),
+        subscribe: (callback, t) => answered(device.subscribe(callback, { timeout: t, signal }), signal),
+        renew: (sid, t) => answered(device.renewSubscription(sid, { timeout: t })),
+        unsubscribe: (sid) => answered(device.unsubscribe(sid)),
       },
       { gateway, host, port: options.port ?? 0, timeout }
     );
@@ -663,15 +670,7 @@ export class Client implements IClient {
     try {
       return await request(info, false);
     } catch (err) {
-      const unanswered =
-        this.cacheGateway &&
-        !this.url &&
-        !signal?.aborted &&
-        !(err instanceof UpnpError) &&
-        !(err instanceof UnsupportedActionError);
-      if (!unanswered) throw err;
-      if (this.cachedInfo === info) this.cachedInfo = null;
-      if (!retryable) throw err;
+      if (signal?.aborted || !this.forgetUnanswered(info, err) || !retryable) throw err;
 
       let found: UpnpInfo;
       try {
@@ -683,6 +682,22 @@ export class Client implements IClient {
       if (found.gateway.description === info.gateway.description) throw err;
       return request(found, true);
     }
+  }
+
+  /**
+   * Drop `info` from the cache when `err` shows its router did not answer: anything but a
+   * UPnP fault, an action it does not offer, or a SUBSCRIBE it refused. True when it did
+   * not answer, so another search can find it.
+   */
+  private forgetUnanswered(info: UpnpInfo, err: unknown): boolean {
+    const unanswered =
+      this.cacheGateway &&
+      !this.url &&
+      !(err instanceof UpnpError) &&
+      !(err instanceof UnsupportedActionError) &&
+      !(err instanceof SubscriptionError);
+    if (unanswered && this.cachedInfo === info) this.cachedInfo = null;
+    return unanswered;
   }
 
   private discoverGateway(): Promise<UpnpInfo> {

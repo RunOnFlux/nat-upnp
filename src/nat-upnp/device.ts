@@ -74,6 +74,34 @@ export class UnsupportedActionError extends Error {
 }
 
 /**
+ * A SUBSCRIBE or UNSUBSCRIBE the router answered with something other than
+ * 200, or answered without the SID a subscription needs. A router that has
+ * rebooted, or whose subscription lapsed, answers a renewal 412.
+ */
+export class SubscriptionError extends Error {
+  readonly method: string;
+  readonly status: number;
+  constructor(method: string, status: number, detail?: string) {
+    super(`${method} answered ${status}${detail ? `: ${detail}` : ""}`);
+    this.name = "SubscriptionError";
+    this.method = method;
+    this.status = status;
+  }
+}
+
+/** A subscription to the WAN connection service's events. */
+export interface EventSubscription {
+  readonly sid: string;
+  /** Seconds the router granted; null when it granted "infinite". */
+  readonly timeout: number | null;
+}
+
+export interface SubscribeOpts extends RequestOpts {
+  /** Seconds to ask for. Default 1800. */
+  timeout?: number;
+}
+
+/**
  * Read a value out of a parsed response.
  *
  * A router may attach attributes to a value element — the YAMAHA RTX810 tags
@@ -173,6 +201,66 @@ const axiosDefaults = {
   maxBodyLength: MAX_RESPONSE_BYTES,
   maxRedirects: 2,
 };
+
+const DEFAULT_SUBSCRIPTION_SECONDS = 1800;
+const genaAgent = new http.Agent({ keepAlive: false });
+
+/** GENA's fixed tokens, shared by the requests sent and the NOTIFYs checked. */
+export const GENA = Object.freeze({
+  SUBSCRIBE: "SUBSCRIBE",
+  UNSUBSCRIBE: "UNSUBSCRIBE",
+  NT: "upnp:event",
+  NTS: "upnp:propchange",
+  TIMEOUT_PREFIX: "Second-",
+  INFINITE: "infinite",
+  /** The answer to a renewal or UNSUBSCRIBE for a SID the gateway does not hold. */
+  SID_NOT_HELD: 412,
+} as const);
+
+const GRANTED_SECONDS = new RegExp(`^${GENA.TIMEOUT_PREFIX}(\\d+)$`, "i");
+const GRANTED_INFINITE = new RegExp(`^(?:${GENA.TIMEOUT_PREFIX})?${GENA.INFINITE}$`, "i");
+
+/**
+ * The lifetime a gateway granted: "Second-1800" → 1800, "Second-infinite" (or a bare
+ * "infinite") → null. TIMEOUT is required in the answer, and one missing or unreadable is
+ * taken to grant what was asked.
+ */
+function grantedTimeout(value: string | undefined, asked: number | null): number | null {
+  if (value === undefined) return asked;
+  if (GRANTED_INFINITE.test(value)) return null;
+  const match = GRANTED_SECONDS.exec(value);
+  return match ? Number(match[1]) : asked;
+}
+
+/** The lifetime to ask for, in whole seconds: `value`, or 1800. */
+export function validTimeout(value: number | undefined): number {
+  const timeout = value ?? DEFAULT_SUBSCRIPTION_SECONDS;
+  if (!Number.isInteger(timeout) || timeout < 1) {
+    throw new RangeError(`timeout must be a whole number of seconds, at least 1, got ${timeout}`);
+  }
+  return timeout;
+}
+
+/** An absolute http URL; a header value must not carry a line break. */
+function validCallback(value: string): string {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new TypeError(`callback must be an absolute http URL, got ${JSON.stringify(value)}`);
+  }
+  if (url.protocol !== "http:" || /[\r\n<>]/.test(value)) {
+    throw new TypeError(`callback must be an absolute http URL, got ${JSON.stringify(value)}`);
+  }
+  return value;
+}
+
+function validSid(value: string): string {
+  if (typeof value !== "string" || !value || /[\r\n]/.test(value)) {
+    throw new TypeError(`sid must be a non-empty string on one line, got ${JSON.stringify(value)}`);
+  }
+  return value;
+}
 
 /** How much of a response's end is kept for finding its closing tag. */
 const CLOSING_TAG_WINDOW = 256;
@@ -508,11 +596,75 @@ export class Device implements IDevice {
     const prefix = (url: string) =>
       new URL(url, baseUrl.toString()).toString();
 
+    const eventSubURL = fieldValue(matched.eventSubURL);
     return {
       service: matched.serviceType,
       SCPDURL: prefix(matched.SCPDURL),
       controlURL: prefix(matched.controlURL),
+      eventSubURL: eventSubURL ? prefix(eventSubURL) : null,
     };
+  }
+
+  /**
+   * Subscribe `callback` (an absolute http URL the router can reach) to the
+   * service's events. The router sends the subscription's first event at once.
+   */
+  public async subscribe(callback: string, options: SubscribeOpts = {}): Promise<EventSubscription> {
+    const timeout = validTimeout(options.timeout);
+    return this.gena(GENA.SUBSCRIBE, {
+      CALLBACK: `<${validCallback(callback)}>`,
+      NT: GENA.NT,
+      TIMEOUT: `${GENA.TIMEOUT_PREFIX}${timeout}`,
+    }, timeout, options.signal);
+  }
+
+  public async renewSubscription(sid: string, options: SubscribeOpts = {}): Promise<EventSubscription> {
+    const timeout = validTimeout(options.timeout);
+    return this.gena(
+      GENA.SUBSCRIBE,
+      { SID: validSid(sid), TIMEOUT: `${GENA.TIMEOUT_PREFIX}${timeout}` },
+      timeout,
+      options.signal
+    );
+  }
+
+  public async unsubscribe(sid: string, options: RequestOpts = {}): Promise<void> {
+    await this.gena(GENA.UNSUBSCRIBE, { SID: validSid(sid) }, null, options.signal);
+  }
+
+  private async gena(
+    method: typeof GENA.SUBSCRIBE | typeof GENA.UNSUBSCRIBE,
+    headers: Record<string, string>,
+    asked: number | null,
+    signal?: AbortSignal
+  ): Promise<EventSubscription> {
+    signal?.throwIfAborted();
+    const info = await untilAborted(this.resolveService(), signal);
+    if (!info.eventSubURL) throw new UnsupportedActionError(`${method} (no eventSubURL)`);
+    let response;
+    try {
+      response = await axios.request({
+        ...axiosDefaults,
+        // A fresh connection each time: these are minutes apart, and a kept one
+        // would be past the router's idle limit.
+        httpAgent: genaAgent,
+        url: info.eventSubURL,
+        method,
+        headers,
+        signal,
+        validateStatus: () => true,
+      });
+    } catch (err) {
+      if (signal?.aborted) throw signal.reason;
+      throw err;
+    }
+    if (response.status !== 200) throw new SubscriptionError(method, response.status);
+    // Node trims each value, and joins a repeated header into one string. Only a first
+    // SUBSCRIBE goes without a SID of its own to fall back on.
+    const answer = response.headers as Record<string, string | undefined>;
+    const sid = answer["sid"] || headers.SID;
+    if (!sid) throw new SubscriptionError(method, 200, "no SID");
+    return { sid, timeout: grantedTimeout(answer["timeout"], asked) };
   }
 
   public async run(
@@ -810,6 +962,8 @@ export interface ResolvedService {
   readonly service: string;
   readonly SCPDURL: string;
   readonly controlURL: string;
+  /** null when the description gives the service none. */
+  readonly eventSubURL: string | null;
 }
 
 export interface RawService {

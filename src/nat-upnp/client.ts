@@ -1,3 +1,4 @@
+import { lookup } from "dns/promises";
 import net from "net";
 import { RawResponse } from "../index";
 import Device, {
@@ -12,7 +13,11 @@ import Device, {
   ONLY_PERMANENT_LEASES,
   RequestOpts,
   untilAborted,
+  SubscribeOpts,
+  SubscriptionError,
+  validTimeout,
 } from "./device";
+import { Subscription } from "./events";
 import Ssdp from "./ssdp";
 
 /**
@@ -106,6 +111,7 @@ export class Client implements IClient {
   private pendingGateway: Promise<UpnpInfo> | null = null;
   private abortDiscovery: (() => void) | null = null;
   private closed = false;
+  private readonly subscriptions = new Set<Subscription>();
 
   url: string | null;
 
@@ -571,6 +577,48 @@ export class Client implements IClient {
   }
 
   /**
+   * Subscribe to the WAN connection service's events: a listener on this host's address
+   * towards the gateway (on `port`, or a free one), and a subscription that renews itself.
+   * Throws when this host's address towards the gateway is not known, rather than
+   * listening on every interface.
+   */
+  public async subscribe(options: SubscribeOpts & { port?: number } = {}): Promise<Subscription> {
+    const { signal } = options;
+    const timeout = validTimeout(options.timeout);
+    const info = await this.getGateway({ signal });
+    const host = await untilAborted(info.getLocalAddress(), signal);
+    if (!host) {
+      throw new Error(`No local address towards ${info.gateway.description}; its events could not reach this host`);
+    }
+    const gateway = await untilAborted(gatewayAddresses(info.gateway.description), signal);
+    // Every request goes to the router found here, the one the listener accepts events
+    // from: a later discovery can find another. A request it leaves unanswered drops it
+    // from the cache, as any request does, and is not sent again: a repeated SUBSCRIBE
+    // would make a second subscription.
+    const device = info.gateway;
+    const answered = <T>(request: Promise<T>, callerSignal?: AbortSignal): Promise<T> =>
+      request.catch((err) => {
+        if (!callerSignal?.aborted) this.forgetUnanswered(info, err);
+        throw err;
+      });
+    const sub = await Subscription.open(
+      {
+        subscribe: (callback, t) => answered(device.subscribe(callback, { timeout: t, signal }), signal),
+        renew: (sid, t) => answered(device.renewSubscription(sid, { timeout: t })),
+        unsubscribe: (sid) => answered(device.unsubscribe(sid)),
+      },
+      { gateway, host, port: options.port ?? 0, timeout }
+    );
+    if (this.closed) {
+      void sub.close();
+      throw new Error("Client is closed");
+    }
+    this.subscriptions.add(sub);
+    sub.once("close", () => this.subscriptions.delete(sub));
+    return sub;
+  }
+
+  /**
    * The gateway, found over SSDP unless a URL was given. Aborting `signal`
    * ends only this caller's wait: a discovery other callers share runs on.
    */
@@ -622,15 +670,7 @@ export class Client implements IClient {
     try {
       return await request(info, false);
     } catch (err) {
-      const unanswered =
-        this.cacheGateway &&
-        !this.url &&
-        !signal?.aborted &&
-        !(err instanceof UpnpError) &&
-        !(err instanceof UnsupportedActionError);
-      if (!unanswered) throw err;
-      if (this.cachedInfo === info) this.cachedInfo = null;
-      if (!retryable) throw err;
+      if (signal?.aborted || !this.forgetUnanswered(info, err) || !retryable) throw err;
 
       let found: UpnpInfo;
       try {
@@ -642,6 +682,22 @@ export class Client implements IClient {
       if (found.gateway.description === info.gateway.description) throw err;
       return request(found, true);
     }
+  }
+
+  /**
+   * Drop `info` from the cache when `err` shows its router did not answer: anything but a
+   * UPnP fault, an action it does not offer, or a SUBSCRIBE it refused. True when it did
+   * not answer, so another search can find it.
+   */
+  private forgetUnanswered(info: UpnpInfo, err: unknown): boolean {
+    const unanswered =
+      this.cacheGateway &&
+      !this.url &&
+      !(err instanceof UpnpError) &&
+      !(err instanceof UnsupportedActionError) &&
+      !(err instanceof SubscriptionError);
+    if (unanswered && this.cachedInfo === info) this.cachedInfo = null;
+    return unanswered;
   }
 
   private discoverGateway(): Promise<UpnpInfo> {
@@ -722,9 +778,12 @@ export class Client implements IClient {
     });
   }
 
+  /** Also ends every subscription this client opened: each stops listening at once, and
+   *  its UNSUBSCRIBE goes out without being waited for. */
   public close() {
     this.closed = true;
     this.abortDiscovery?.();
+    for (const sub of [...this.subscriptions]) void sub.close();
   }
 
   private async requireCapability(
@@ -1013,5 +1072,12 @@ export interface IClient {
   getStatusInfo(options?: RequestOpts): Promise<StatusInfo>;
   getPublicIp(options?: RequestOpts): Promise<string>;
   getGateway(options?: RequestOpts): Promise<UpnpInfo>;
+  subscribe(options?: SubscribeOpts & { port?: number }): Promise<Subscription>;
   close(): void;
+}
+
+/** The addresses a gateway's description URL names: an IP literal, or a name's every address. */
+async function gatewayAddresses(description: string): Promise<string[]> {
+  const host = new URL(description).hostname.replace(/^\[(.*)\]$/, "$1");
+  return (await lookup(host, { all: true })).map((a) => a.address);
 }

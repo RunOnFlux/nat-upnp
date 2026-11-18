@@ -165,6 +165,34 @@ const range = await client.getMappingRange({
 });
 ```
 
+## Events
+
+A router announces changes to its WAN connection service — among them `PortMappingNumberOfEntries`, the size of its mapping table — to subscribers (UPnP eventing, GENA). `subscribe()` starts a listener and subscribes it:
+
+```typescript
+const sub = await client.subscribe({ port: 49152, timeout: 1800 }); // both optional: a free port, 1800 s
+
+sub.on("event", (event) => {
+  console.log(event.seq, event.properties.PortMappingNumberOfEntries);
+});
+sub.on("lost", (reason) => {
+  // a renewal was refused (412 after a router reboot), it lapsed unanswered, or the
+  // listener failed: subscribe again if events are still wanted
+});
+
+await sub.close(); // stop listening, and UNSUBSCRIBE
+```
+
+`close` is emitted once when the subscription ends, by `sub.close()`, `client.close()` or `lost`.
+
+The listener binds to this host's address towards the router, and `subscribe()` throws when that address is not known rather than listening on every interface. The router must be able to reach the port: a host firewall that drops its connections drops every event. Connections from any other address are closed unanswered — so a router that sent its NOTIFYs from an address other than its description's would deliver no events, which a caller confirming that events arrive notices at once (every router seen on the Flux fleet sends them from that address) — and NOTIFYs are answered as GENA requires (400 without NT, NTS or a decimal SEQ, or with a body that is not a propertyset; 412 for a wrong NT/NTS, or — once the SID is known — a SID that is not this subscription's; 413 for a body over 64 KiB). Until the SID is known, NOTIFYs are answered 200 and held, at most 16 (412 beyond), and those with another SID are dropped.
+
+The subscription starts with an event carrying every evented variable (`seq` 0), which can reach this host before the SUBSCRIBE is answered; it is held until then, so it is never lost. Events are emitted after the router has been answered, in the order their NOTIFYs arrive. `seq` is the router's numbering — 0 on subscribing, then one up per event, wrapping from 4294967295 to 1 — so a gap means an event was missed; events are not held back to restore that order, since one lost NOTIFY would stall every event after it. The subscription renews itself at half of each granted lifetime — also when the router grants "infinite", since a router that reboots forgets it — and is `lost` when a renewal is refused or none is answered before it lapses. However it ends, it UNSUBSCRIBEs, unless the router has answered 412 — it no longer holds the subscription.
+
+A SUBSCRIBE the router refuses rejects with `SubscriptionError`, carrying the HTTP status; one answered without a SID is refused the same way. A service whose description gives no event URL throws `UnsupportedActionError`. `Device` also exposes the requests themselves: `subscribe(callback)`, `renewSubscription(sid)` and `unsubscribe(sid)`.
+
+Routers that describe eventing do not all deliver it. Across the Flux fleet some answer SUBSCRIBE without a SID, some send the first event and none after, and most signal only changes to the table's size, not a mapping replaced at the same size. A caller that relies on events should confirm a change of its own brings one, and still read the table now and then.
+
 ## SSDP Bypass
 
 If you already know the router's UPnP URL, skip SSDP discovery:
@@ -242,7 +270,7 @@ Port mapping methods accept a `ttl` option (seconds). Default is 1800 (30 minute
 
 ## Resource Management
 
-SSDP sockets are created per gateway discovery and closed automatically when discovery completes. A connection the router keeps open is held for at most 3 seconds without a request (see [Connections](#connections)) and never keeps the process alive. `close()` is available to signal that the client should not be used further, but forgetting to call it does not leak resources.
+SSDP sockets are created per gateway discovery and closed automatically when discovery completes. A connection the router keeps open is held for at most 3 seconds without a request (see [Connections](#connections)) and never keeps the process alive. `close()` is available to signal that the client should not be used further, but forgetting to call it does not leak resources. A subscription is the exception: its listener and renewals run until `sub.close()`, or until `client.close()`, which ends every subscription the client opened.
 
 ```typescript
 // Resources are managed automatically

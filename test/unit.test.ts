@@ -3234,7 +3234,7 @@ function getSoapFaultCode(xml: string): number | null {
         fakeRequest({ ...config, url: config.url.replace(new URL(config.url).origin, new URL(DESCRIPTION_URL).origin) });
       try {
         const sub = await g.client.subscribe();
-        const lost = await new Promise<Error>((resolve) => sub.once("lost", resolve));
+        const lost = await within(new Promise<Error>((resolve) => sub.once("lost", resolve)), 4000, "lost");
         assert(lost instanceof SubscriptionError, `lost to a SubscriptionError, got ${lost}`);
         await g.client.getPublicIp(); // a dropped gateway would be searched for here
         assertEqual(g.searches(), searches, "no new search");
@@ -3242,6 +3242,32 @@ function getSoapFaultCode(xml: string): number | null {
         (axiosModule as any).request = fakeRequest;
       }
     }, { cacheGateway: true, localAddress: "127.0.0.1" });
+  });
+
+  await test("a subscription's requests all go to the router it subscribed, though a new search finds another", async () => {
+    await withMovingGateway(async (g) => {
+      setGenaAnswer((req) => ({ status: 200, headers: { sid: req.headers.SID ?? "uuid:a", timeout: "Second-2" } }));
+      const origins: string[] = [];
+      const fakeRequest = axiosModule.request;
+      (axiosModule as any).request = async (config: any) => {
+        origins.push(`${config.method} ${new URL(config.url).origin}`);
+        return fakeRequest({ ...config, url: config.url.replace(new URL(config.url).origin, new URL(DESCRIPTION_URL).origin) });
+      };
+      try {
+        const sub = await g.client.subscribe();
+        const searches = g.searches();
+        g.announce(SECOND_LOCATION); // another router now answers searches
+        await new Promise((r) => setTimeout(r, 1300)); // past the renewal at half of 2 s
+        await sub.close();
+        assertEqual(
+          origins.join(" | "),
+          [`SUBSCRIBE ${FIRST_ORIGIN}`, `SUBSCRIBE ${FIRST_ORIGIN}`, `UNSUBSCRIBE ${FIRST_ORIGIN}`].join(" | ")
+        );
+        assertEqual(g.searches(), searches, "no search after subscribing");
+      } finally {
+        (axiosModule as any).request = fakeRequest;
+      }
+    }, { cacheGateway: false, localAddress: "127.0.0.1" });
   });
 
   await test("a cached gateway that stops answering is found at its new location, and the call answers from there", async () => {
@@ -5919,6 +5945,7 @@ function getSoapFaultCode(xml: string): number | null {
           method,
           path: url.pathname,
           headers: { "Content-Length": Buffer.byteLength(body), ...headers },
+          agent: false, // a new connection each time, as a router makes
         },
         (res) => {
           res.resume();
@@ -5978,7 +6005,6 @@ function getSoapFaultCode(xml: string): number | null {
     return { sub, events, ...s };
   }
 
-  const tick = (): Promise<void> => new Promise((r) => setImmediate(r));
 
   /** Nothing listens at `url`: the connection is refused. */
   async function nothingListening(url: string): Promise<boolean> {
@@ -6069,9 +6095,12 @@ function getSoapFaultCode(xml: string): number | null {
 
   for (const [timeout, expected] of [
     ["infinite", null],
+    ["INFINITE", null],
     ["Second-60", 60],
     ["second-60", 60],
-    ["Second-", null],
+    ["Second-", 1800],
+    ["1800", 1800],
+    ["Second-infinite", 1800],
     [undefined, 1800],
   ] as const) {
     await test(`a granted TIMEOUT of ${JSON.stringify(timeout)} reads as ${expected}`, async () => {
@@ -6215,6 +6244,19 @@ function getSoapFaultCode(xml: string): number | null {
     }
   });
 
+  await test("events are emitted in the order their NOTIFYs arrive, each with its own seq", async () => {
+    const { sub, events, callback } = await opened();
+    try {
+      for (const seq of [2, 1, 4294967295, 1]) {
+        assertEqual(await sendNotify(callback(), notifyHeaders("uuid:s1", seq)), 200);
+      }
+      await sleep(30);
+      assertEqual(events.map((e) => e.seq).join(), "2,1,4294967295,1");
+    } finally {
+      await sub.close();
+    }
+  });
+
   await test("an early event for another SID is dropped", async () => {
     const s = scripted({
       subscribe: async (cb) => {
@@ -6250,7 +6292,7 @@ function getSoapFaultCode(xml: string): number | null {
     }
   });
 
-  await test("an event is emitted after the gateway is answered, so a throwing handler cannot stop the listener", async () => {
+  await test("a handler's error is not swallowed, and the listener keeps answering", async () => {
     const { sub, callback } = await opened();
     const thrown: unknown[] = [];
     const catcher = (err: unknown) => thrown.push(err);
@@ -6273,17 +6315,57 @@ function getSoapFaultCode(xml: string): number | null {
     }
   });
 
-  await test("an event is not emitted on the tick its NOTIFY is answered", async () => {
-    const { sub, events, callback } = await opened();
+  await test("no event is emitted by a subscription closed before its queued events were emitted", async () => {
+    const s = scripted({
+      subscribe: async (cb) => {
+        await sendNotify(cb, notifyHeaders("uuid:s1", 0)); // held until the SID is known
+        return { sid: "uuid:s1", timeout: 1800 };
+      },
+    });
+    const sub = await Subscription.open(s.requests, { gateway: ["127.0.0.1"], host: "127.0.0.1", port: 0, timeout: 1800 });
+    const events: UpnpEvent[] = [];
+    sub.on("event", (e) => events.push(e));
+    await sub.close(); // before the held event's turn comes
+    await sleep(30);
+    assertEqual(events.length, 0);
+  });
+
+  await test("lost is emitted once, though a refused renewal and the lapse both end the subscription", async () => {
+    const { sub } = await opened({ renew: async () => Promise.reject(new SubscriptionError("SUBSCRIBE", 412)) }, { timeout: 2 });
+    let lost = 0;
+    sub.on("lost", () => lost++);
+    await sleep(2600); // past the refusal at 1 s and the lapse due at 2 s
+    assertEqual(lost, 1);
+  });
+
+  await test("close() during a renewal: the late grant arms no timer, and nothing follows", async () => {
+    let answer: (() => void) | null = null;
+    const { sub, calls } = await opened(
+      { renew: (sid, t) => new Promise((resolve) => (answer = () => resolve({ sid, timeout: t }))) },
+      { timeout: 2 }
+    );
+    let lost = 0;
+    sub.on("lost", () => lost++);
+    await sleep(1200); // the renewal at 1 s is in flight
+    assert(answer !== null, "renewing");
+    await sub.close();
+    // A renewal or lapse timer armed now would keep the process alive for the lifetime.
+    const { timers } = await recordingTimers(async () => {
+      answer!();
+      await new Promise((r) => setImmediate(r));
+    });
+    assertEqual(timers.map(([ms]) => ms).join(), "", "no timer armed after close()");
+    await sleep(2500);
+    assertEqual(calls.filter((c) => c.startsWith("RENEW")).length, 1);
+    assertEqual(lost, 0);
+  });
+
+  await test("NOTIFYs are accepted from any of the gateway's addresses", async () => {
+    const { sub, events, callback } = await opened({}, { gateway: ["192.0.2.9", "127.0.0.1"] });
     try {
-      let sync = -1;
-      sub.once("event", () => {});
-      const status = sendNotify(callback(), notifyHeaders("uuid:s1", 3));
-      assertEqual(await status, 200);
-      sync = events.length; // the response arrived; the emit is queued behind it
-      await tick();
-      await sleep(10);
-      assert(sync <= events.length && events.length === 1, `emitted later (${sync} then ${events.length})`);
+      assertEqual(await sendNotify(callback(), notifyHeaders("uuid:s1", 1)), 200);
+      await sleep(20);
+      assertEqual(events.length, 1);
     } finally {
       await sub.close();
     }
@@ -6401,6 +6483,81 @@ function getSoapFaultCode(xml: string): number | null {
     }
   });
 
+  await test("a lifetime too long for a timer is renewed after a day, not at once", async () => {
+    const { sub, calls } = await opened({ subscribe: async () => ({ sid: "uuid:s1", timeout: 4294967295 }) });
+    try {
+      await sleep(300);
+      assertEqual(calls.filter((c) => c.startsWith("RENEW")).length, 0);
+    } finally {
+      await sub.close();
+    }
+  });
+
+  await test("a step in the wall clock does not lose a subscription whose renewal goes unanswered", async () => {
+    let attempts = 0;
+    const realNow = Date.now;
+    const { sub } = await opened(
+      {
+        renew: async (sid, t) => {
+          attempts++;
+          if (attempts === 1) {
+            Date.now = () => realNow() + 86_400_000; // NTP steps the clock a day forward
+            throw new Error("socket hang up");
+          }
+          return { sid, timeout: t };
+        },
+      },
+      { timeout: 4 }
+    );
+    let lost: Error | null = null;
+    sub.once("lost", (e) => (lost = e));
+    try {
+      await sleep(4500);
+      assert(attempts >= 2, "retried");
+      assertEqual(lost, null);
+    } finally {
+      Date.now = realNow;
+      await sub.close();
+    }
+  });
+
+  /** The delays setTimeout is asked for while `fn` runs, with their callbacks. */
+  async function recordingTimers<T>(fn: () => Promise<T>): Promise<{ result: T; timers: Array<[number, () => void]> }> {
+    const real = global.setTimeout;
+    const timers: Array<[number, () => void]> = [];
+    (global as any).setTimeout = (cb: () => void, ms: number, ...rest: unknown[]) => {
+      timers.push([ms, cb]);
+      return (real as any)(cb, ms, ...rest);
+    };
+    try {
+      return { result: await fn(), timers };
+    } finally {
+      global.setTimeout = real;
+    }
+  }
+
+  for (const [what, granted, renewMs] of [
+    ["infinite", null, 900_000],
+    ["a lifetime past what a timer holds", 4294967295, 86_400_000],
+  ] as const) {
+    await test(`a grant of ${what} renews within a day and lapses within two`, async () => {
+      const s = scripted({ subscribe: async () => ({ sid: "uuid:s1", timeout: granted }) });
+      const { result: sub, timers } = await recordingTimers(() =>
+        Subscription.open(s.requests, { gateway: ["127.0.0.1"], host: "127.0.0.1", port: 0, timeout: 1800 })
+      );
+      try {
+        const delays = timers.map(([ms]) => ms);
+        assert(delays.includes(renewMs), `a renewal at ${renewMs} ms, got ${delays.join()}`);
+        assert(delays.includes(172_800_000), `a lapse at two days, got ${delays.join()}`);
+        const lost = new Promise<Error>((r) => sub.once("lost", r));
+        timers.find(([ms]) => ms === 172_800_000)![1](); // the two days pass
+        assert(/lapsed/.test(String(await within(lost, 1000, "lost"))), "lost to the lapse");
+      } finally {
+        await sub.close();
+      }
+    });
+  }
+
   await test("renews a subscription granted infinite as if granted the lifetime asked", async () => {
     const { sub, calls } = await opened({ subscribe: async () => ({ sid: "uuid:s1", timeout: null }) }, { timeout: 2 });
     try {
@@ -6418,7 +6575,7 @@ function getSoapFaultCode(xml: string): number | null {
       { timeout: 4 }
     );
     const started = Date.now();
-    const lost = await new Promise<Error>((resolve) => sub.once("lost", resolve));
+    const lost = await within(new Promise<Error>((resolve) => sub.once("lost", resolve)), 4000, "lost");
     assert(lost instanceof SubscriptionError && lost.status === 412, String(lost));
     // Renewed at 2 s; lost then, not retried until the lifetime ends at 4 s.
     assert(Date.now() - started < 3000, `lost after ${Date.now() - started} ms`);
@@ -6438,12 +6595,13 @@ function getSoapFaultCode(xml: string): number | null {
           return { sid, timeout: t };
         },
       },
-      { timeout: 3 }
+      { timeout: 4 }
     );
     let lost: Error | null = null;
     sub.once("lost", (e) => (lost = e));
     try {
-      await sleep(2700);
+      // Renewal at 2 s goes unanswered, the retry at 3 s is granted, the lapse was due at 4 s.
+      await sleep(4500);
       assert(attempts >= 2, `retried (${calls.join()})`);
       assertEqual(lost, null);
     } finally {
@@ -6454,7 +6612,7 @@ function getSoapFaultCode(xml: string): number | null {
   await test("a subscription whose renewals go unanswered is lost when it lapses", async () => {
     const { sub } = await opened({ renew: async () => Promise.reject(new Error("socket hang up")) }, { timeout: 2 });
     const started = Date.now();
-    const lost = await new Promise<Error>((resolve) => sub.once("lost", resolve));
+    const lost = await within(new Promise<Error>((resolve) => sub.once("lost", resolve)), 4000, "lost at the lapse");
     assert(/socket hang up/.test(String(lost)), String(lost));
     assert(Date.now() - started < 3500, "lost by the end of its lifetime");
   });
@@ -6465,6 +6623,137 @@ function getSoapFaultCode(xml: string): number | null {
     await sub.close();
     assertEqual(calls.filter((c) => c.startsWith("UNSUBSCRIBE")).join(), "UNSUBSCRIBE uuid:s1");
     assert(await nothingListening(callback()), "nothing listening");
+  });
+
+  await test("client.close() ends its subscriptions: UNSUBSCRIBE, nothing listening, no renewal", async () => {
+    const restore = installFakeRouter("opnsense");
+    setGenaAnswer((req) => ({ status: 200, headers: { sid: req.headers.SID ?? "uuid:c", timeout: "Second-2" } }));
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: "127.0.0.1" });
+    try {
+      const sub = await client.subscribe({ timeout: 2 });
+      const closed = new Promise<void>((r) => sub.once("close", r));
+      const callback = genaRequests[0].headers.CALLBACK.slice(1, -1);
+      client.close();
+      await within(closed, 1000, "the close event");
+      assert(await nothingListening(callback), "nothing listening");
+      await sleep(1300); // past when the renewal was due
+      assertEqual(genaRequests.map((r) => `${r.method} ${r.headers.SID ?? ""}`).join(" | "), "SUBSCRIBE  | UNSUBSCRIBE uuid:c");
+    } finally {
+      restore();
+    }
+  });
+
+  await test("subscribe() on a closed client rejects with nothing sent and nothing listening", async () => {
+    const restore = installFakeRouter("opnsense");
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: "127.0.0.1" });
+    client.close();
+    try {
+      const err = await expectThrow(() => client.subscribe(), "the subscribe");
+      assert(/closed/.test(String(err)), String(err));
+      assertEqual(genaRequests.length, 0);
+    } finally {
+      restore();
+    }
+  });
+
+  await test("a client closed while subscribing ends the new subscription and rejects", async () => {
+    const restore = installFakeRouter("opnsense");
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: "127.0.0.1" });
+    setGenaAnswer((req) => {
+      if (req.method === "SUBSCRIBE") client.close();
+      return { status: 200, headers: { sid: "uuid:late", timeout: "Second-1800" } };
+    });
+    try {
+      const err = await expectThrow(() => client.subscribe(), "the subscribe");
+      assert(/closed/.test(String(err)), String(err));
+      await sleep(50);
+      assertEqual(genaRequests.map((r) => r.method).join(), "SUBSCRIBE,UNSUBSCRIBE");
+      assert(await nothingListening(genaRequests[0].headers.CALLBACK.slice(1, -1)), "nothing listening");
+    } finally {
+      restore();
+    }
+  });
+
+  await test("close is emitted once, after close() and after lost", async () => {
+    const a = await opened();
+    let aClosed = 0;
+    a.sub.on("close", () => aClosed++);
+    await a.sub.close();
+    await a.sub.close();
+    await sleep(20);
+    assertEqual(aClosed, 1);
+
+    const b = await opened({ renew: async () => Promise.reject(new SubscriptionError("SUBSCRIBE", 412)) }, { timeout: 2 });
+    const order: string[] = [];
+    b.sub.on("lost", () => order.push("lost"));
+    b.sub.on("close", () => order.push("close"));
+    await within(new Promise<void>((r) => b.sub.once("close", () => r())), 4000, "close after lost");
+    await b.sub.close();
+    await sleep(20);
+    assertEqual(order.join(), "lost,close");
+  });
+
+  /** Run `fn` with every server Subscription.open creates handed to `seen`. */
+  async function capturingServers<T>(seen: http.Server[], fn: () => Promise<T>): Promise<T> {
+    const real = http.createServer;
+    (http as any).createServer = (...args: any[]) => {
+      const server = (real as any)(...args);
+      seen.push(server);
+      return server;
+    };
+    try {
+      return await fn();
+    } finally {
+      (http as any).createServer = real;
+    }
+  }
+
+  await test("a listener error while subscribing rejects open(), unsubscribes the new SID, and leaves nothing", async () => {
+    const servers: http.Server[] = [];
+    const s = scripted({
+      subscribe: async () => {
+        servers[0].emit("error", new Error("EMFILE: too many open files"));
+        return { sid: "uuid:s1", timeout: 1800 };
+      },
+    });
+    const err = await capturingServers(servers, () =>
+      expectThrow(
+        () => Subscription.open(s.requests, { gateway: ["127.0.0.1"], host: "127.0.0.1", port: 0, timeout: 2 }),
+        "open"
+      )
+    );
+    assert(/EMFILE/.test(String(err)), String(err));
+    assertEqual(s.calls.join(" | "), "SUBSCRIBE 2 | UNSUBSCRIBE uuid:s1");
+    assert(await nothingListening(s.callback()), "nothing listening");
+    await sleep(1300); // past when a renewal of the 2 s grant would be due
+    assertEqual(s.calls.filter((c) => c.startsWith("RENEW")).length, 0);
+  });
+
+  await test("a SUBSCRIBE that fails after the router subscribed is undone by the SID its first event carried", async () => {
+    const s = scripted({
+      subscribe: async (cb) => {
+        await sendNotify(cb, notifyHeaders("uuid:orphan", 0));
+        throw new Error("timeout of 10000ms exceeded");
+      },
+    });
+    const err = await expectThrow(
+      () => Subscription.open(s.requests, { gateway: ["127.0.0.1"], host: "127.0.0.1", port: 0, timeout: 1800 }),
+      "open"
+    );
+    assert(/timeout/.test(String(err)), String(err));
+    assertEqual(s.calls.join(" | "), "SUBSCRIBE 1800 | UNSUBSCRIBE uuid:orphan");
+    assert(await nothingListening(s.callback()), "nothing listening");
+  });
+
+  await test("a refused SUBSCRIBE with no event unsubscribes nothing and leaves nothing listening", async () => {
+    const s = scripted({ subscribe: async () => Promise.reject(new SubscriptionError("SUBSCRIBE", 412)) });
+    const err = await expectThrow(
+      () => Subscription.open(s.requests, { gateway: ["127.0.0.1"], host: "127.0.0.1", port: 0, timeout: 1800 }),
+      "open"
+    );
+    assert(err instanceof SubscriptionError, String(err));
+    assertEqual(s.calls.join(" | "), "SUBSCRIBE 1800");
+    assert(await nothingListening(s.callback()), "nothing listening");
   });
 
   await test("open() rejects, with nothing sent, when the port is taken", async () => {

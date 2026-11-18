@@ -13,7 +13,6 @@ import Device, {
   ONLY_PERMANENT_LEASES,
   RequestOpts,
   untilAborted,
-  SubscriptionError,
   SubscribeOpts,
 } from "./device";
 import { Subscription } from "./events";
@@ -110,6 +109,7 @@ export class Client implements IClient {
   private pendingGateway: Promise<UpnpInfo> | null = null;
   private abortDiscovery: (() => void) | null = null;
   private closed = false;
+  private readonly subscriptions = new Set<Subscription>();
 
   url: string | null;
 
@@ -592,16 +592,25 @@ export class Client implements IClient {
       throw new Error(`No local address towards ${info.gateway.description}; its events could not reach this host`);
     }
     const gateway = await untilAborted(gatewayAddresses(info.gateway.description), signal);
-    // Not sent twice: a repeated SUBSCRIBE would make a second subscription.
-    return Subscription.open(
+    // Every request goes to the router found here, the one the listener accepts events
+    // from: a later discovery can find another. Not sent twice, since a repeated
+    // SUBSCRIBE would make a second subscription.
+    const device = info.gateway;
+    const sub = await Subscription.open(
       {
-        subscribe: (callback, t) =>
-          this.onGateway(signal, (i) => i.gateway.subscribe(callback, { timeout: t, signal }), false),
-        renew: (sid, t) => this.onGateway(undefined, (i) => i.gateway.renewSubscription(sid, { timeout: t }), false),
-        unsubscribe: (sid) => this.onGateway(undefined, (i) => i.gateway.unsubscribe(sid), false),
+        subscribe: (callback, t) => device.subscribe(callback, { timeout: t, signal }),
+        renew: (sid, t) => device.renewSubscription(sid, { timeout: t }),
+        unsubscribe: (sid) => device.unsubscribe(sid),
       },
       { gateway, host, port: options.port ?? 0, timeout }
     );
+    if (this.closed) {
+      void sub.close();
+      throw new Error("Client is closed");
+    }
+    this.subscriptions.add(sub);
+    sub.once("close", () => this.subscriptions.delete(sub));
+    return sub;
   }
 
   /**
@@ -661,7 +670,6 @@ export class Client implements IClient {
         !this.url &&
         !signal?.aborted &&
         !(err instanceof UpnpError) &&
-        !(err instanceof SubscriptionError) &&
         !(err instanceof UnsupportedActionError);
       if (!unanswered) throw err;
       if (this.cachedInfo === info) this.cachedInfo = null;
@@ -757,9 +765,12 @@ export class Client implements IClient {
     });
   }
 
+  /** Also ends every subscription this client opened: each stops listening at once, and
+   *  its UNSUBSCRIBE goes out without being waited for. */
   public close() {
     this.closed = true;
     this.abortDiscovery?.();
+    for (const sub of [...this.subscriptions]) void sub.close();
   }
 
   private async requireCapability(

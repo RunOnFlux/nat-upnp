@@ -209,10 +209,27 @@ function headerValue(value: unknown): string {
   return (Array.isArray(value) ? String(value[0] ?? "") : String(value ?? "")).trim();
 }
 
-/** "Second-1800" → 1800; "infinite", or anything unreadable, → null. */
-function subscriptionTimeout(value: string): number | null {
-  const match = /^Second-(\d+)$/i.exec(value);
-  return match ? Number(match[1]) : null;
+/** GENA's fixed tokens, shared by the requests sent and the NOTIFYs checked. */
+export const GENA = Object.freeze({
+  SUBSCRIBE: "SUBSCRIBE",
+  UNSUBSCRIBE: "UNSUBSCRIBE",
+  NT: "upnp:event",
+  NTS: "upnp:propchange",
+  TIMEOUT_PREFIX: "Second-",
+  INFINITE: "infinite",
+} as const);
+
+const GRANTED_SECONDS = new RegExp(`^${GENA.TIMEOUT_PREFIX}(\\d+)$`, "i");
+
+/**
+ * The lifetime a gateway granted: "Second-1800" → 1800, "infinite" → null. TIMEOUT is
+ * required in the answer, and one missing or unreadable is taken to grant what was asked:
+ * only "infinite" itself means a subscription that never lapses.
+ */
+function grantedTimeout(value: string, asked: number | null): number | null {
+  if (value.toLowerCase() === GENA.INFINITE) return null;
+  const match = GRANTED_SECONDS.exec(value);
+  return match ? Number(match[1]) : asked;
 }
 
 function validTimeout(value: number | undefined): number {
@@ -593,24 +610,29 @@ export class Device implements IDevice {
    */
   public async subscribe(callback: string, options: SubscribeOpts = {}): Promise<EventSubscription> {
     const timeout = validTimeout(options.timeout);
-    return this.gena("SUBSCRIBE", {
+    return this.gena(GENA.SUBSCRIBE, {
       CALLBACK: `<${validCallback(callback)}>`,
-      NT: "upnp:event",
-      TIMEOUT: `Second-${timeout}`,
+      NT: GENA.NT,
+      TIMEOUT: `${GENA.TIMEOUT_PREFIX}${timeout}`,
     }, timeout, options.signal);
   }
 
   public async renewSubscription(sid: string, options: SubscribeOpts = {}): Promise<EventSubscription> {
     const timeout = validTimeout(options.timeout);
-    return this.gena("SUBSCRIBE", { SID: validSid(sid), TIMEOUT: `Second-${timeout}` }, timeout, options.signal);
+    return this.gena(
+      GENA.SUBSCRIBE,
+      { SID: validSid(sid), TIMEOUT: `${GENA.TIMEOUT_PREFIX}${timeout}` },
+      timeout,
+      options.signal
+    );
   }
 
   public async unsubscribe(sid: string, options: RequestOpts = {}): Promise<void> {
-    await this.gena("UNSUBSCRIBE", { SID: validSid(sid) }, null, options.signal);
+    await this.gena(GENA.UNSUBSCRIBE, { SID: validSid(sid) }, null, options.signal);
   }
 
   private async gena(
-    method: "SUBSCRIBE" | "UNSUBSCRIBE",
+    method: typeof GENA.SUBSCRIBE | typeof GENA.UNSUBSCRIBE,
     headers: Record<string, string>,
     asked: number | null,
     signal?: AbortSignal
@@ -631,11 +653,8 @@ export class Device implements IDevice {
     });
     if (response.status !== 200) throw new SubscriptionError(method, response.status);
     const sid = headerValue(response.headers?.["sid"]) || headers.SID;
-    if (method === "SUBSCRIBE" && !sid) throw new SubscriptionError(method, 200, "no SID");
-    // TIMEOUT is required in the answer; a gateway that leaves it out is taken to grant
-    // what was asked, never "infinite", so the subscription is still renewed.
-    const granted = headerValue(response.headers?.["timeout"]);
-    return { sid: sid ?? "", timeout: granted ? subscriptionTimeout(granted) : asked };
+    if (method === GENA.SUBSCRIBE && !sid) throw new SubscriptionError(method, 200, "no SID");
+    return { sid: sid ?? "", timeout: grantedTimeout(headerValue(response.headers?.["timeout"]), asked) };
   }
 
   public async run(

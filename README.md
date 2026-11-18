@@ -180,12 +180,14 @@ sub.on("lost", (reason) => {
   // listener failed: subscribe again if events are still wanted
 });
 
-await sub.close(); // UNSUBSCRIBE, and stop listening
+await sub.close(); // stop listening, and UNSUBSCRIBE
 ```
 
-The listener binds to this host's address towards the router, and `subscribe()` throws when that address is not known rather than listening on every interface. The router must be able to reach the port: a host firewall that drops its connections drops every event. Connections from any other address are closed unanswered, and NOTIFYs are answered as GENA requires (400 without NT, NTS or a decimal SEQ, or with a body that is not XML; 412 for a SID that is not this subscription's or a wrong NT/NTS; 413 for a body over 64 KiB).
+`close` is emitted once when the subscription ends, by `sub.close()`, `client.close()` or `lost`.
 
-The subscription starts with an event carrying every evented variable (`seq` 0), which can reach this host before the SUBSCRIBE is answered; it is held until then, so it is never lost. Events are emitted after the router has been answered, in the order it numbered them. The subscription renews itself at half of each granted lifetime — also when the router grants "infinite", since a router that reboots forgets it — and is `lost` when a renewal is refused or none is answered before it lapses.
+The listener binds to this host's address towards the router, and `subscribe()` throws when that address is not known rather than listening on every interface. The router must be able to reach the port: a host firewall that drops its connections drops every event. Connections from any other address are closed unanswered — so a router that sent its NOTIFYs from an address other than its description's would deliver no events, which a caller confirming that events arrive notices at once (every router seen on the Flux fleet sends them from that address) — and NOTIFYs are answered as GENA requires (400 without NT, NTS or a decimal SEQ, or with a body that is not XML; 412 for a wrong NT/NTS, or — once the SID is known — a SID that is not this subscription's; 413 for a body over 64 KiB). Until the SID is known, NOTIFYs are answered 200 and held, at most 16 (412 beyond), and those with another SID are dropped.
+
+The subscription starts with an event carrying every evented variable (`seq` 0), which can reach this host before the SUBSCRIBE is answered; it is held until then, so it is never lost. Events are emitted after the router has been answered, in the order their NOTIFYs arrive. `seq` is the router's numbering — 0 on subscribing, then one up per event, wrapping from 4294967295 to 1 — so a gap means an event was missed; events are not held back to restore that order, since one lost NOTIFY would stall every event after it. The subscription renews itself at half of each granted lifetime — also when the router grants "infinite", since a router that reboots forgets it — and is `lost` when a renewal is refused or none is answered before it lapses.
 
 A SUBSCRIBE the router refuses rejects with `SubscriptionError`, carrying the HTTP status; one answered without a SID is refused the same way. A service whose description gives no event URL throws `UnsupportedActionError`. `Device` also exposes the requests themselves: `subscribe(callback)`, `renewSubscription(sid)` and `unsubscribe(sid)`.
 
@@ -268,7 +270,7 @@ Port mapping methods accept a `ttl` option (seconds). Default is 1800 (30 minute
 
 ## Resource Management
 
-SSDP sockets are created per gateway discovery and closed automatically when discovery completes. A connection the router keeps open is held for at most 3 seconds without a request (see [Connections](#connections)) and never keeps the process alive. `close()` is available to signal that the client should not be used further, but forgetting to call it does not leak resources.
+SSDP sockets are created per gateway discovery and closed automatically when discovery completes. A connection the router keeps open is held for at most 3 seconds without a request (see [Connections](#connections)) and never keeps the process alive. `close()` is available to signal that the client should not be used further, but forgetting to call it does not leak resources. A subscription is the exception: its listener and renewals run until `sub.close()`, or until `client.close()`, which ends every subscription the client opened.
 
 ```typescript
 // Resources are managed automatically

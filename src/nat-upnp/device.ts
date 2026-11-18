@@ -74,6 +74,34 @@ export class UnsupportedActionError extends Error {
 }
 
 /**
+ * A SUBSCRIBE or UNSUBSCRIBE the router answered with something other than
+ * 200, or answered without the SID a subscription needs. A router that has
+ * rebooted, or whose subscription lapsed, answers a renewal 412.
+ */
+export class SubscriptionError extends Error {
+  readonly method: string;
+  readonly status: number;
+  constructor(method: string, status: number, detail?: string) {
+    super(`${method} answered ${status}${detail ? `: ${detail}` : ""}`);
+    this.name = "SubscriptionError";
+    this.method = method;
+    this.status = status;
+  }
+}
+
+/** A subscription to the WAN connection service's events. */
+export interface EventSubscription {
+  readonly sid: string;
+  /** Seconds the router granted; null when it granted "infinite". */
+  readonly timeout: number | null;
+}
+
+export interface SubscribeOpts extends RequestOpts {
+  /** Seconds to ask for. Default 1800. */
+  timeout?: number;
+}
+
+/**
  * Read a value out of a parsed response.
  *
  * A router may attach attributes to a value element — the YAMAHA RTX810 tags
@@ -173,6 +201,19 @@ const axiosDefaults = {
   maxBodyLength: MAX_RESPONSE_BYTES,
   maxRedirects: 2,
 };
+
+const DEFAULT_SUBSCRIPTION_SECONDS = 1800;
+const genaAgent = new http.Agent({ keepAlive: false });
+
+function headerValue(value: unknown): string {
+  return (Array.isArray(value) ? String(value[0] ?? "") : String(value ?? "")).trim();
+}
+
+/** "Second-1800" → 1800; "infinite", or anything unreadable, → null. */
+function subscriptionTimeout(value: string): number | null {
+  const match = /^Second-(\d+)$/i.exec(value);
+  return match ? Number(match[1]) : null;
+}
 
 /** How much of a response's end is kept for finding its closing tag. */
 const CLOSING_TAG_WINDOW = 256;
@@ -508,11 +549,61 @@ export class Device implements IDevice {
     const prefix = (url: string) =>
       new URL(url, baseUrl.toString()).toString();
 
+    const eventSubURL = fieldValue(matched.eventSubURL);
     return {
       service: matched.serviceType,
       SCPDURL: prefix(matched.SCPDURL),
       controlURL: prefix(matched.controlURL),
+      eventSubURL: eventSubURL ? prefix(eventSubURL) : null,
     };
+  }
+
+  /**
+   * Subscribe `callback` (an absolute http URL the router can reach) to the
+   * service's events. The router sends the subscription's first event at once.
+   */
+  public async subscribe(callback: string, options: SubscribeOpts = {}): Promise<EventSubscription> {
+    return this.gena("SUBSCRIBE", {
+      CALLBACK: `<${callback}>`,
+      NT: "upnp:event",
+      TIMEOUT: `Second-${options.timeout ?? DEFAULT_SUBSCRIPTION_SECONDS}`,
+    }, options.signal);
+  }
+
+  public async renewSubscription(sid: string, options: SubscribeOpts = {}): Promise<EventSubscription> {
+    return this.gena("SUBSCRIBE", {
+      SID: sid,
+      TIMEOUT: `Second-${options.timeout ?? DEFAULT_SUBSCRIPTION_SECONDS}`,
+    }, options.signal);
+  }
+
+  public async unsubscribe(sid: string, options: RequestOpts = {}): Promise<void> {
+    await this.gena("UNSUBSCRIBE", { SID: sid }, options.signal);
+  }
+
+  private async gena(
+    method: "SUBSCRIBE" | "UNSUBSCRIBE",
+    headers: Record<string, string>,
+    signal?: AbortSignal
+  ): Promise<EventSubscription> {
+    signal?.throwIfAborted();
+    const info = await untilAborted(this.resolveService(), signal);
+    if (!info.eventSubURL) throw new UnsupportedActionError(`${method} (no eventSubURL)`);
+    const response = await axios.request({
+      ...axiosDefaults,
+      // A fresh connection each time: these are minutes apart, and a kept one
+      // would be past the router's idle limit.
+      httpAgent: genaAgent,
+      url: info.eventSubURL,
+      method,
+      headers,
+      signal,
+      validateStatus: () => true,
+    });
+    if (response.status !== 200) throw new SubscriptionError(method, response.status);
+    const sid = headerValue(response.headers?.["sid"]) || headers.SID;
+    if (method === "SUBSCRIBE" && !sid) throw new SubscriptionError(method, 200, "no SID");
+    return { sid: sid ?? "", timeout: subscriptionTimeout(headerValue(response.headers?.["timeout"])) };
   }
 
   public async run(
@@ -810,6 +901,8 @@ export interface ResolvedService {
   readonly service: string;
   readonly SCPDURL: string;
   readonly controlURL: string;
+  /** null when the description gives the service none. */
+  readonly eventSubURL: string | null;
 }
 
 export interface RawService {

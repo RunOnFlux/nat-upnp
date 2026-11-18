@@ -12,7 +12,11 @@ import Device, {
   ONLY_PERMANENT_LEASES,
   RequestOpts,
   untilAborted,
+  SubscriptionError,
+  EventSubscription,
+  SubscribeOpts,
 } from "./device";
+import { EventListener } from "./events";
 import Ssdp from "./ssdp";
 
 /**
@@ -571,6 +575,38 @@ export class Client implements IClient {
   }
 
   /**
+   * Subscribe to the WAN connection service's events, delivered to `callback`
+   * (an EventListener's). Not sent twice: a repeat would make a second
+   * subscription.
+   */
+  public async subscribe(options: SubscribeOpts & { callback: string }): Promise<EventSubscription> {
+    return this.onGateway(options.signal, (info) => info.gateway.subscribe(options.callback, options), false);
+  }
+
+  /** Throws SubscriptionError 412 when the router no longer holds the subscription. */
+  public async renewSubscription(options: SubscribeOpts & { sid: string }): Promise<EventSubscription> {
+    return this.onGateway(options.signal, (info) => info.gateway.renewSubscription(options.sid, options), false);
+  }
+
+  public async unsubscribe(options: RequestOpts & { sid: string }): Promise<void> {
+    return this.onGateway(options.signal, (info) => info.gateway.unsubscribe(options.sid, options), false);
+  }
+
+  /**
+   * A listener for the gateway's events on this host's address towards it,
+   * accepting NOTIFYs only from the gateway. Call listen() on it before
+   * subscribing with its callback.
+   */
+  public async createEventListener(options: RequestOpts & { port?: number } = {}): Promise<EventListener> {
+    const info = await this.getGateway({ signal: options.signal });
+    return new EventListener({
+      gateway: new URL(info.gateway.description).hostname,
+      host: await untilAborted(info.getLocalAddress(), options.signal),
+      port: options.port ?? 0,
+    });
+  }
+
+  /**
    * The gateway, found over SSDP unless a URL was given. Aborting `signal`
    * ends only this caller's wait: a discovery other callers share runs on.
    */
@@ -627,6 +663,7 @@ export class Client implements IClient {
         !this.url &&
         !signal?.aborted &&
         !(err instanceof UpnpError) &&
+        !(err instanceof SubscriptionError) &&
         !(err instanceof UnsupportedActionError);
       if (!unanswered) throw err;
       if (this.cachedInfo === info) this.cachedInfo = null;
@@ -1013,5 +1050,9 @@ export interface IClient {
   getStatusInfo(options?: RequestOpts): Promise<StatusInfo>;
   getPublicIp(options?: RequestOpts): Promise<string>;
   getGateway(options?: RequestOpts): Promise<UpnpInfo>;
+  subscribe(options: SubscribeOpts & { callback: string }): Promise<EventSubscription>;
+  renewSubscription(options: SubscribeOpts & { sid: string }): Promise<EventSubscription>;
+  unsubscribe(options: RequestOpts & { sid: string }): Promise<void>;
+  createEventListener(options?: RequestOpts & { port?: number }): Promise<EventListener>;
   close(): void;
 }

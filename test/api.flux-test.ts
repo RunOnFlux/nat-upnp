@@ -640,55 +640,41 @@ setupTest("NAT-UPNP/Client", (opts) => {
 
   opts.run("Events — the subscription's first NOTIFY, then one each for a mapping added and removed", async () => {
     const port = ~~(Math.random() * 10000 + 40000);
-    const listener = await client.createEventListener();
+    const sub = await client.subscribe({ timeout: 300 });
     const events: UpnpEvent[] = [];
-    await listener.listen((e) => events.push(e));
-    let sid: string | null = null;
+    sub.on("event", (e) => events.push(e));
     try {
-      const sub = await client.subscribe({ callback: listener.callback, timeout: 300 });
-      sid = sub.sid;
-      console.log("  Callback:", listener.callback, "SID:", sid, "timeout:", sub.timeout);
+      console.log("  SID:", sub.sid, "timeout:", sub.timeout);
       if (!(await eventsBy(events, 1, 5000))) return false;
       const before = Number(events[0].properties.PortMappingNumberOfEntries);
       await client.createMapping({ public: port, private: port, ttl: 0, description: "nat-upnp events" });
       if (!(await eventsBy(events, 2, 5000))) return false;
       await client.removeMapping({ public: port });
       if (!(await eventsBy(events, 3, 5000))) return false;
-      const renewed = await client.renewSubscription({ sid });
-      console.log(
-        "  Events:",
-        events.map((e) => `${e.seq}:${e.properties.PortMappingNumberOfEntries}`).join(" "),
-        "renewed:", renewed.timeout
-      );
+      console.log("  Events:", events.map((e) => `${e.seq}:${e.properties.PortMappingNumberOfEntries}`).join(" "));
       return (
-        events.every((e) => e.sid === sid) &&
         events.map((e) => e.seq).join() === "0,1,2" &&
         Number(events[1].properties.PortMappingNumberOfEntries) === before + 1 &&
-        Number(events[2].properties.PortMappingNumberOfEntries) === before &&
-        renewed.sid === sid
+        Number(events[2].properties.PortMappingNumberOfEntries) === before
       );
     } finally {
-      if (sid) await client.unsubscribe({ sid }).catch(() => {});
       await removeQuietly(port);
-      await listener.close();
+      await sub.close();
     }
   });
 
   opts.run("Events — a renewal after UNSUBSCRIBE is refused 412", async () => {
-    const listener = await client.createEventListener();
-    await listener.listen(() => {});
+    const info = await client.getGateway();
+    const sub = await client.subscribe({ timeout: 300 });
+    await info.gateway.unsubscribe(sub.sid);
     try {
-      const { sid } = await client.subscribe({ callback: listener.callback, timeout: 300 });
-      await client.unsubscribe({ sid });
-      try {
-        await client.renewSubscription({ sid });
-        return false;
-      } catch (err) {
-        console.log("  Renewal answered:", err instanceof SubscriptionError ? err.status : err);
-        return err instanceof SubscriptionError && err.status === 412;
-      }
+      await info.gateway.renewSubscription(sub.sid);
+      return false;
+    } catch (err) {
+      console.log("  Renewal answered:", err instanceof SubscriptionError ? err.status : err);
+      return err instanceof SubscriptionError && err.status === 412;
     } finally {
-      await listener.close();
+      await sub.close();
     }
   });
 

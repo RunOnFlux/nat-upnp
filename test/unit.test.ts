@@ -16,7 +16,7 @@ import {
 import { Device, type DeviceOpts, KEEP_ALIVE_HINT_MARGIN_MS, KEPT_CONNECTION_IDLE_MS, keptIdleLimit, upnpAgent } from "../src/nat-upnp/device";
 import { Client, canonicalDescription, type Mapping } from "../src/nat-upnp/client";
 import { SubscriptionError } from "../src/nat-upnp/device";
-import { EventListener, type UpnpEvent } from "../src/nat-upnp/events";
+import { Subscription, type SubscriptionRequests, type UpnpEvent } from "../src/nat-upnp/events";
 import { parseMimeHeader, Ssdp, type SsdpEmitter } from "../src/nat-upnp/ssdp";
 import { surveyedRouters } from "./router-data";
 import { installFakeDgram, FakeSocket, ssdpResponse, settle, SSDP_SERVER } from "./fake-dgram";
@@ -3226,19 +3226,22 @@ function getSoapFaultCode(xml: string): number | null {
     await withMovingGateway(async (g) => {
       await g.client.getPublicIp();
       const searches = g.searches();
-      setGenaAnswer(() => ({ status: 412 }));
+      setGenaAnswer((req) =>
+        req.headers.SID ? { status: 412 } : { status: 200, headers: { sid: "uuid:x", timeout: "Second-2" } }
+      );
       const fakeRequest = axiosModule.request;
       (axiosModule as any).request = async (config: any) =>
         fakeRequest({ ...config, url: config.url.replace(new URL(config.url).origin, new URL(DESCRIPTION_URL).origin) });
       try {
-        const err = await expectThrow(() => g.client.renewSubscription({ sid: "uuid:x" }), "the renewal");
-        assert(err instanceof SubscriptionError, `a SubscriptionError, got ${err}`);
+        const sub = await g.client.subscribe();
+        const lost = await new Promise<Error>((resolve) => sub.once("lost", resolve));
+        assert(lost instanceof SubscriptionError, `lost to a SubscriptionError, got ${lost}`);
         await g.client.getPublicIp(); // a dropped gateway would be searched for here
         assertEqual(g.searches(), searches, "no new search");
       } finally {
         (axiosModule as any).request = fakeRequest;
       }
-    });
+    }, { cacheGateway: true, localAddress: "127.0.0.1" });
   });
 
   await test("a cached gateway that stops answering is found at its new location, and the call answers from there", async () => {
@@ -5900,171 +5903,21 @@ function getSoapFaultCode(xml: string): number | null {
     return null;
   }
 
-  for (const slug of readdirSync(fixturesDir)
-    .filter((f) => f.endsWith("-rootdesc.xml"))
-    .map((f) => f.slice(0, -"-rootdesc.xml".length))) {
-    await test(`${slug}: SUBSCRIBE goes to the WAN connection service's eventSubURL`, async () => {
-      const restore = installFakeRouter(slug);
-      const client = new Client({ url: DESCRIPTION_URL, localAddress: "127.0.0.1" });
-      try {
-        await client.subscribe({ callback: "http://127.0.0.1:49152/" });
-        assertEqual(genaRequests[0]?.url, wanEventSubUrl(loadFixture(`${slug}-rootdesc.xml`)));
-      } finally {
-        client.close();
-        restore();
-      }
-    });
-  }
-
-  await test("SUBSCRIBE names the callback, the event type and the lifetime asked for", async () => {
-    const restore = installFakeRouter("opnsense");
-    const client = new Client({ url: DESCRIPTION_URL, localAddress: "127.0.0.1" });
-    try {
-      const sub = await client.subscribe({ callback: "http://127.0.0.1:49152/" });
-      assertEqual(sub.sid, "uuid:fake-sub-1");
-      assertEqual(sub.timeout, 1800);
-      const req = genaRequests[0];
-      assertEqual(req.method, "SUBSCRIBE");
-      assertEqual(req.headers.CALLBACK, "<http://127.0.0.1:49152/>");
-      assertEqual(req.headers.NT, "upnp:event");
-      assertEqual(req.headers.TIMEOUT, "Second-1800");
-      await client.subscribe({ callback: "http://127.0.0.1:49152/", timeout: 300 });
-      assertEqual(genaRequests[1].headers.TIMEOUT, "Second-300");
-    } finally {
-      client.close();
-      restore();
-    }
-  });
-
-  await test("a renewal names the SID and the lifetime, and no callback", async () => {
-    const restore = installFakeRouter("opnsense");
-    const client = new Client({ url: DESCRIPTION_URL, localAddress: "127.0.0.1" });
-    try {
-      const sub = await client.renewSubscription({ sid: "uuid:abc" });
-      assertEqual(sub.sid, "uuid:abc");
-      const req = genaRequests[0];
-      assertEqual(req.method, "SUBSCRIBE");
-      assertEqual(req.headers.SID, "uuid:abc");
-      assertEqual(req.headers.TIMEOUT, "Second-1800");
-      assertEqual(req.headers.CALLBACK, undefined);
-      assertEqual(req.headers.NT, undefined);
-    } finally {
-      client.close();
-      restore();
-    }
-  });
-
-  await test("UNSUBSCRIBE names the SID", async () => {
-    const restore = installFakeRouter("opnsense");
-    const client = new Client({ url: DESCRIPTION_URL, localAddress: "127.0.0.1" });
-    try {
-      await client.unsubscribe({ sid: "uuid:abc" });
-      assertEqual(genaRequests[0].method, "UNSUBSCRIBE");
-      assertEqual(genaRequests[0].headers.SID, "uuid:abc");
-    } finally {
-      client.close();
-      restore();
-    }
-  });
-
-  for (const [timeout, expected] of [
-    ["infinite", null],
-    ["Second-60", 60],
-    ["second-60", 60],
-    ["Second-", null],
-    ["", null],
-  ] as const) {
-    await test(`a granted TIMEOUT of "${timeout}" reads as ${expected}`, async () => {
-      const restore = installFakeRouter("opnsense");
-      setGenaAnswer(() => ({ status: 200, headers: { sid: "uuid:x", timeout } }));
-      const client = new Client({ url: DESCRIPTION_URL, localAddress: "127.0.0.1" });
-      try {
-        assertEqual((await client.subscribe({ callback: "http://127.0.0.1:1/" })).timeout, expected);
-      } finally {
-        client.close();
-        restore();
-      }
-    });
-  }
-
-  for (const [what, answer, status] of [
-    ["a 412", { status: 412 }, 412],
-    ["a 500", { status: 500 }, 500],
-    ["a 200 without a SID", { status: 200, headers: {} }, 200],
-  ] as const) {
-    await test(`SUBSCRIBE answered with ${what} throws SubscriptionError`, async () => {
-      const restore = installFakeRouter("opnsense");
-      setGenaAnswer(() => answer);
-      const client = new Client({ url: DESCRIPTION_URL, localAddress: "127.0.0.1" });
-      try {
-        const err = await expectThrow(() => client.subscribe({ callback: "http://127.0.0.1:1/" }), what);
-        assert(err instanceof SubscriptionError, `a SubscriptionError, got ${err}`);
-        assertEqual((err as SubscriptionError).status, status);
-        assertEqual((err as SubscriptionError).method, "SUBSCRIBE");
-      } finally {
-        client.close();
-        restore();
-      }
-    });
-  }
-
-  await test("a renewal the router no longer holds throws SubscriptionError 412", async () => {
-    const restore = installFakeRouter("opnsense");
-    setGenaAnswer(() => ({ status: 412 }));
-    const client = new Client({ url: DESCRIPTION_URL, localAddress: "127.0.0.1" });
-    try {
-      const err = await expectThrow(() => client.renewSubscription({ sid: "uuid:gone" }), "the renewal");
-      assertEqual((err as SubscriptionError).status, 412);
-    } finally {
-      client.close();
-      restore();
-    }
-  });
-
-  await test("a SUBSCRIBE with no answer propagates and is not sent twice", async () => {
-    const restore = installFakeRouter("opnsense", "transport");
-    const client = new Client({ url: DESCRIPTION_URL, localAddress: "127.0.0.1" });
-    try {
-      const err = await expectThrow(() => client.subscribe({ callback: "http://127.0.0.1:1/" }), "the subscribe");
-      assert(!(err instanceof SubscriptionError), "no answer is not a refusal");
-      assertEqual(genaRequests.length, 1);
-    } finally {
-      client.close();
-      restore();
-    }
-  });
-
-  await test("an aborted signal sends no SUBSCRIBE", async () => {
-    const restore = installFakeRouter("opnsense");
-    const client = new Client({ url: DESCRIPTION_URL, localAddress: "127.0.0.1" });
-    try {
-      const controller = new AbortController();
-      controller.abort(new Error("stop"));
-      await expectThrow(
-        () => client.subscribe({ callback: "http://127.0.0.1:1/", signal: controller.signal }),
-        "the aborted subscribe"
-      );
-      assertEqual(genaRequests.length, 0);
-    } finally {
-      client.close();
-      restore();
-    }
-  });
-
-  /** Send one request to a listener on 127.0.0.1; resolves with the status. */
-  function sendToListener(
-    port: number,
+  /** Send one request from 127.0.0.1 (or `from`); resolves with the status. */
+  function sendNotify(
+    target: string,
     headers: Record<string, string>,
-    body = "",
+    body = PROPERTY_SET,
     method = "NOTIFY"
   ): Promise<number> {
+    const url = new URL(target);
     return new Promise((resolve, reject) => {
       const req = http.request(
         {
-          host: "127.0.0.1",
-          port,
+          host: url.hostname.replace(/^\[(.*)\]$/, "$1"),
+          port: Number(url.port),
           method,
-          path: "/",
+          path: url.pathname,
           headers: { "Content-Length": Buffer.byteLength(body), ...headers },
         },
         (res) => {
@@ -6080,135 +5933,620 @@ function getSoapFaultCode(xml: string): number | null {
   const PROPERTY_SET =
     '<?xml version="1.0"?><e:propertyset xmlns:e="urn:schemas-upnp-org:event-1-0">' +
     "<e:property><ConnectionStatus>Connected</ConnectionStatus></e:property>" +
-    "<e:property><ExternalIPAddress>203.0.113.1</ExternalIPAddress></e:property>" +
     "<e:property><PortMappingNumberOfEntries>7</PortMappingNumberOfEntries></e:property>" +
     "<e:property><X_Note>a &amp; b</X_Note></e:property></e:propertyset>";
 
-  /** A listener on 127.0.0.1 that accepts the gateway `gateway`, and what it received. */
-  async function listening(gateway = "127.0.0.1"): Promise<{ listener: EventListener; port: number; events: UpnpEvent[] }> {
-    const listener = new EventListener({ gateway, host: "127.0.0.1", port: 0 });
-    const events: UpnpEvent[] = [];
-    await listener.listen((e) => events.push(e));
-    const port = Number(new URL(listener.callback).port);
-    return { listener, port, events };
+  const notifyHeaders = (sid: string, seq: number | string): Record<string, string> => ({
+    NT: "upnp:event",
+    NTS: "upnp:propchange",
+    SID: sid,
+    SEQ: String(seq),
+  });
+
+  /** Requests a test scripts, recording each call. `subscribe` captures the callback. */
+  function scripted(over: Partial<SubscriptionRequests> = {}) {
+    const calls: string[] = [];
+    let callback = "";
+    const requests: SubscriptionRequests = {
+      subscribe: async (cb, t) => {
+        callback = cb;
+        calls.push(`SUBSCRIBE ${t}`);
+        return over.subscribe ? over.subscribe(cb, t) : { sid: "uuid:s1", timeout: t };
+      },
+      renew: async (sid, t) => {
+        calls.push(`RENEW ${sid} ${t}`);
+        return over.renew ? over.renew(sid, t) : { sid, timeout: t };
+      },
+      unsubscribe: async (sid) => {
+        calls.push(`UNSUBSCRIBE ${sid}`);
+        if (over.unsubscribe) await over.unsubscribe(sid);
+      },
+    };
+    return { requests, calls, callback: () => callback };
   }
 
-  await test("the listener reports a NOTIFY's SID, sequence number and every property", async () => {
-    const { listener, port, events } = await listening();
+  async function opened(over: Partial<SubscriptionRequests> = {}, opts: { gateway?: string[]; timeout?: number } = {}) {
+    const s = scripted(over);
+    const sub = await Subscription.open(s.requests, {
+      gateway: opts.gateway ?? ["127.0.0.1"],
+      host: "127.0.0.1",
+      port: 0,
+      timeout: opts.timeout ?? 1800,
+    });
+    const events: UpnpEvent[] = [];
+    sub.on("event", (e) => events.push(e));
+    return { sub, events, ...s };
+  }
+
+  const tick = (): Promise<void> => new Promise((r) => setImmediate(r));
+
+  /** Nothing listens at `url`: the connection is refused. */
+  async function nothingListening(url: string): Promise<boolean> {
+    return sendNotify(url, notifyHeaders("uuid:s1", 0)).then(
+      () => false,
+      (err) => /ECONNREFUSED/.test(String(err))
+    );
+  }
+
+  /** Something listens at `url` and closes the connection without answering. */
+  async function closedUnanswered(url: string): Promise<boolean> {
+    return sendNotify(url, notifyHeaders("uuid:s1", 0)).then(
+      () => false,
+      (err) => /ECONNRESET|socket hang up/.test(String(err))
+    );
+  }
+
+  for (const slug of readdirSync(fixturesDir)
+    .filter((f) => f.endsWith("-rootdesc.xml"))
+    .map((f) => f.slice(0, -"-rootdesc.xml".length))) {
+    await test(`${slug}: SUBSCRIBE and UNSUBSCRIBE go to the WAN connection service's eventSubURL`, async () => {
+      const restore = installFakeRouter(slug);
+      const client = new Client({ url: DESCRIPTION_URL, localAddress: "127.0.0.1" });
+      try {
+        const sub = await client.subscribe();
+        await sub.close();
+        const expected = wanEventSubUrl(loadFixture(`${slug}-rootdesc.xml`));
+        assertEqual(genaRequests.map((r) => `${r.method} ${r.url}`).join(" | "), `SUBSCRIBE ${expected} | UNSUBSCRIBE ${expected}`);
+      } finally {
+        client.close();
+        restore();
+      }
+    });
+  }
+
+  await test("SUBSCRIBE names a callback on this host, the event type and the lifetime asked for", async () => {
+    const restore = installFakeRouter("opnsense");
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: "127.0.0.1" });
     try {
-      assertEqual(await sendToListener(port, { SID: "uuid:s", SEQ: "4", NT: "upnp:event", NTS: "upnp:propchange" }, PROPERTY_SET), 200);
-      assertEqual(events.length, 1);
-      assertEqual(events[0].sid, "uuid:s");
-      assertEqual(events[0].seq, 4);
-      assertEqual(events[0].properties.PortMappingNumberOfEntries, "7");
-      assertEqual(events[0].properties.ConnectionStatus, "Connected");
-      assertEqual(events[0].properties.X_Note, "a & b");
+      const a = await client.subscribe();
+      const b = await client.subscribe({ timeout: 300, port: 0 });
+      assertEqual(a.sid, "uuid:fake-sub-1");
+      assertEqual(a.timeout, 1800);
+      const [ra, rb] = genaRequests;
+      assert(/^<http:\/\/127\.0\.0\.1:\d+\/>$/.test(ra.headers.CALLBACK), `CALLBACK ${ra.headers.CALLBACK}`);
+      assertEqual(ra.headers.NT, "upnp:event");
+      assertEqual(ra.headers.TIMEOUT, "Second-1800");
+      assertEqual(rb.headers.TIMEOUT, "Second-300");
+      await a.close();
+      await b.close();
+      assertEqual(genaRequests[2].headers.SID, "uuid:fake-sub-1");
     } finally {
-      await listener.close();
+      client.close();
+      restore();
     }
   });
 
-  await test("the listener reads properties whose names carry a namespace prefix", async () => {
-    const { listener, port, events } = await listening();
+  await test("a renewal names the SID and the lifetime, and no callback", async () => {
+    const restore = installFakeRouter("opnsense");
+    setGenaAnswer((req) => ({ status: 200, headers: { sid: req.headers.SID ?? "uuid:r", timeout: "Second-2" } }));
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: "127.0.0.1" });
+    try {
+      const sub = await client.subscribe({ timeout: 2 });
+      await sleep(1300);
+      await sub.close();
+      const renewal = genaRequests[1];
+      assertEqual(renewal.method, "SUBSCRIBE");
+      assertEqual(renewal.headers.SID, "uuid:r");
+      assertEqual(renewal.headers.TIMEOUT, "Second-2");
+      assertEqual(renewal.headers.CALLBACK, undefined);
+      assertEqual(renewal.headers.NT, undefined);
+    } finally {
+      client.close();
+      restore();
+    }
+  });
+
+  await test("a renewal answered without a SID keeps the subscription's", async () => {
+    const restore = installFakeRouter("opnsense");
+    setGenaAnswer(() => ({ status: 200, headers: { timeout: "Second-1800" } }));
+    try {
+      const granted = await new Device(DESCRIPTION_URL).renewSubscription("uuid:keep");
+      assertEqual(granted.sid, "uuid:keep");
+    } finally {
+      restore();
+    }
+  });
+
+  for (const [timeout, expected] of [
+    ["infinite", null],
+    ["Second-60", 60],
+    ["second-60", 60],
+    ["Second-", null],
+    [undefined, 1800],
+  ] as const) {
+    await test(`a granted TIMEOUT of ${JSON.stringify(timeout)} reads as ${expected}`, async () => {
+      const restore = installFakeRouter("opnsense");
+      const headers: Record<string, string> = { sid: "uuid:x" };
+      if (timeout !== undefined) headers.timeout = timeout;
+      setGenaAnswer(() => ({ status: 200, headers }));
+      const client = new Client({ url: DESCRIPTION_URL, localAddress: "127.0.0.1" });
+      try {
+        const sub = await client.subscribe();
+        assertEqual(sub.timeout, expected);
+        await sub.close();
+      } finally {
+        client.close();
+        restore();
+      }
+    });
+  }
+
+  for (const [what, answer, status] of [
+    ["a 412", { status: 412 }, 412],
+    ["a 500", { status: 500 }, 500],
+    ["a 200 without a SID", { status: 200, headers: {} }, 200],
+  ] as const) {
+    await test(`SUBSCRIBE answered with ${what} rejects with SubscriptionError and stops listening`, async () => {
+      const restore = installFakeRouter("opnsense");
+      setGenaAnswer(() => answer);
+      const client = new Client({ url: DESCRIPTION_URL, localAddress: "127.0.0.1" });
+      try {
+        const err = await expectThrow(() => client.subscribe(), what);
+        assert(err instanceof SubscriptionError, `a SubscriptionError, got ${err}`);
+        assertEqual((err as SubscriptionError).status, status);
+        assertEqual((err as SubscriptionError).method, "SUBSCRIBE");
+        assert(await nothingListening(genaRequests[0].headers.CALLBACK.slice(1, -1)), "nothing left listening");
+      } finally {
+        client.close();
+        restore();
+      }
+    });
+  }
+
+  await test("a SUBSCRIBE with no answer rejects, is not sent twice, and stops listening", async () => {
+    const restore = installFakeRouter("opnsense", "transport");
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: "127.0.0.1" });
+    try {
+      const err = await expectThrow(() => client.subscribe(), "the subscribe");
+      assert(!(err instanceof SubscriptionError), "no answer is not a refusal");
+      assertEqual(genaRequests.length, 1);
+      assert(await nothingListening(genaRequests[0].headers.CALLBACK.slice(1, -1)), "nothing left listening");
+    } finally {
+      client.close();
+      restore();
+    }
+  });
+
+  await test("an aborted signal sends no SUBSCRIBE", async () => {
+    const restore = installFakeRouter("opnsense");
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: "127.0.0.1" });
+    try {
+      const controller = new AbortController();
+      controller.abort(new Error("stop"));
+      await expectThrow(() => client.subscribe({ signal: controller.signal }), "the aborted subscribe");
+      assertEqual(genaRequests.length, 0);
+    } finally {
+      client.close();
+      restore();
+    }
+  });
+
+  for (const timeout of [0, -1, 1.5, NaN]) {
+    await test(`a timeout of ${timeout} is refused before anything is sent`, async () => {
+      const restore = installFakeRouter("opnsense");
+      const client = new Client({ url: DESCRIPTION_URL, localAddress: "127.0.0.1" });
+      try {
+        const err = await expectThrow(() => client.subscribe({ timeout }), "the subscribe");
+        assert(err instanceof RangeError, `a RangeError, got ${err}`);
+        const device = new Device(DESCRIPTION_URL);
+        assert((await expectThrow(() => device.subscribe("http://127.0.0.1:1/", { timeout }), "device")) instanceof RangeError, "device");
+        assertEqual(genaRequests.length, 0);
+      } finally {
+        client.close();
+        restore();
+      }
+    });
+  }
+
+  for (const [what, call] of [
+    ["a callback that is not a URL", (d: Device) => d.subscribe("not a url")],
+    ["an https callback", (d: Device) => d.subscribe("https://127.0.0.1:1/")],
+    ["a callback with a line break", (d: Device) => d.subscribe("http://127.0.0.1:1/\r\nX: y")],
+    ["a SID with a line break", (d: Device) => d.renewSubscription("uuid:a\r\nX: y")],
+    ["an empty SID", (d: Device) => d.unsubscribe("")],
+  ] as const) {
+    await test(`${what} is refused before anything is sent`, async () => {
+      const restore = installFakeRouter("opnsense");
+      try {
+        const err = await expectThrow(() => call(new Device(DESCRIPTION_URL)), what);
+        assert(err instanceof TypeError, `a TypeError, got ${err}`);
+        assertEqual(genaRequests.length, 0);
+      } finally {
+        restore();
+      }
+    });
+  }
+
+
+  await test("subscribe() throws when this host's address towards the gateway is unknown, and sends nothing", async () => {
+    const restore = installFakeRouter("opnsense");
+    const client = new Client({ url: DESCRIPTION_URL, localAddress: "127.0.0.1" });
+    const info = await client.getGateway();
+    // As when the route lookup towards the gateway fails.
+    (info as any).getLocalAddress = async () => "";
+    try {
+      const err = await expectThrow(() => client.subscribe(), "the subscribe");
+      assert(/No local address/.test(String(err)), String(err));
+      assertEqual(genaRequests.length, 0);
+    } finally {
+      client.close();
+      restore();
+    }
+  });
+
+  await test("an event the gateway sends before the SUBSCRIBE is answered is delivered first", async () => {
+    const s = scripted({
+      subscribe: async (cb) => {
+        assertEqual(await sendNotify(cb, notifyHeaders("uuid:s1", 0)), 200);
+        return { sid: "uuid:s1", timeout: 1800 };
+      },
+    });
+    const sub = await Subscription.open(s.requests, { gateway: ["127.0.0.1"], host: "127.0.0.1", port: 0, timeout: 1800 });
+    const events: UpnpEvent[] = [];
+    sub.on("event", (e) => events.push(e));
+    try {
+      await sendNotify(s.callback(), notifyHeaders("uuid:s1", 1));
+      await sendNotify(s.callback(), notifyHeaders("uuid:s1", 2));
+      await sleep(50);
+      assertEqual(events.map((e) => e.seq).join(), "0,1,2");
+      assertEqual(events[0].properties.PortMappingNumberOfEntries, "7");
+    } finally {
+      await sub.close();
+    }
+  });
+
+  await test("an early event for another SID is dropped", async () => {
+    const s = scripted({
+      subscribe: async (cb) => {
+        await sendNotify(cb, notifyHeaders("uuid:other", 0));
+        return { sid: "uuid:s1", timeout: 1800 };
+      },
+    });
+    const sub = await Subscription.open(s.requests, { gateway: ["127.0.0.1"], host: "127.0.0.1", port: 0, timeout: 1800 });
+    const events: UpnpEvent[] = [];
+    sub.on("event", (e) => events.push(e));
+    try {
+      await sleep(50);
+      assertEqual(events.length, 0);
+    } finally {
+      await sub.close();
+    }
+  });
+
+  await test("more early events than are held are answered 412", async () => {
+    let statuses: number[] = [];
+    const s = scripted({
+      subscribe: async (cb) => {
+        for (let i = 0; i < 18; i++) statuses.push(await sendNotify(cb, notifyHeaders("uuid:s1", i)));
+        return { sid: "uuid:s1", timeout: 1800 };
+      },
+    });
+    const sub = await Subscription.open(s.requests, { gateway: ["127.0.0.1"], host: "127.0.0.1", port: 0, timeout: 1800 });
+    try {
+      assertEqual(statuses.filter((x) => x === 200).length, 16);
+      assertEqual(statuses.filter((x) => x === 412).length, 2);
+    } finally {
+      await sub.close();
+    }
+  });
+
+  await test("an event is emitted after the gateway is answered, so a throwing handler cannot stop the listener", async () => {
+    const { sub, callback } = await opened();
+    const thrown: unknown[] = [];
+    const catcher = (err: unknown) => thrown.push(err);
+    process.prependListener("uncaughtException", catcher);
+    const delivered: number[] = [];
+    sub.on("event", (e) => {
+      delivered.push(e.seq);
+      if (e.seq === 1) throw new Error("handler bug");
+    });
+    try {
+      assertEqual(await sendNotify(callback(), notifyHeaders("uuid:s1", 1)), 200);
+      await sleep(30);
+      assertEqual(await sendNotify(callback(), notifyHeaders("uuid:s1", 2)), 200);
+      await sleep(30);
+      assertEqual(delivered.join(), "1,2");
+      assertEqual(thrown.length, 1, "the handler's own error surfaces, not swallowed");
+    } finally {
+      process.off("uncaughtException", catcher);
+      await sub.close();
+    }
+  });
+
+  await test("an event is not emitted on the tick its NOTIFY is answered", async () => {
+    const { sub, events, callback } = await opened();
+    try {
+      let sync = -1;
+      sub.once("event", () => {});
+      const status = sendNotify(callback(), notifyHeaders("uuid:s1", 3));
+      assertEqual(await status, 200);
+      sync = events.length; // the response arrived; the emit is queued behind it
+      await tick();
+      await sleep(10);
+      assert(sync <= events.length && events.length === 1, `emitted later (${sync} then ${events.length})`);
+    } finally {
+      await sub.close();
+    }
+  });
+
+  for (const [what, headers, body, expected] of [
+    ["a SID that is not this subscription's", notifyHeaders("uuid:other", 1), PROPERTY_SET, 412],
+    ["no NT", { NTS: "upnp:propchange", SID: "uuid:s1", SEQ: "1" }, PROPERTY_SET, 400],
+    ["no NTS", { NT: "upnp:event", SID: "uuid:s1", SEQ: "1" }, PROPERTY_SET, 400],
+    ["a wrong NT", { ...notifyHeaders("uuid:s1", 1), NT: "upnp:other" }, PROPERTY_SET, 412],
+    ["a wrong NTS", { ...notifyHeaders("uuid:s1", 1), NTS: "ssdp:alive" }, PROPERTY_SET, 412],
+    ["no SID", { NT: "upnp:event", NTS: "upnp:propchange", SEQ: "1" }, PROPERTY_SET, 412],
+    ["an empty SEQ", notifyHeaders("uuid:s1", ""), PROPERTY_SET, 400],
+    ["a hex SEQ", notifyHeaders("uuid:s1", "0x10"), PROPERTY_SET, 400],
+    ["a fractional SEQ", notifyHeaders("uuid:s1", "1.5"), PROPERTY_SET, 400],
+    ["a negative SEQ", notifyHeaders("uuid:s1", "-1"), PROPERTY_SET, 400],
+    ["a body that is not XML", notifyHeaders("uuid:s1", 1), "<e:propertyset><unclosed>", 400],
+  ] as const) {
+    await test(`a NOTIFY with ${what} is answered ${expected} and not emitted`, async () => {
+      const { sub, events, callback } = await opened();
+      try {
+        assertEqual(await sendNotify(callback(), headers as Record<string, string>, body), expected);
+        await sleep(20);
+        assertEqual(events.length, 0);
+      } finally {
+        await sub.close();
+      }
+    });
+  }
+
+  await test("any method but NOTIFY is answered 405", async () => {
+    const { sub, callback } = await opened();
+    try {
+      assertEqual(await sendNotify(callback(), notifyHeaders("uuid:s1", 1), PROPERTY_SET, "POST"), 405);
+    } finally {
+      await sub.close();
+    }
+  });
+
+  await test("a body over 64 KiB is answered 413, every time", async () => {
+    const { sub, events, callback } = await opened();
+    try {
+      for (let i = 0; i < 3; i++) {
+        assertEqual(await sendNotify(callback(), notifyHeaders("uuid:s1", i), "x".repeat(70 * 1024)), 413);
+      }
+      assertEqual(events.length, 0);
+    } finally {
+      await sub.close();
+    }
+  });
+
+  await test("a connection from any address but the gateway's is closed unanswered", async () => {
+    const { sub, events, callback } = await opened({}, { gateway: ["192.0.2.1"] });
+    try {
+      assert(await closedUnanswered(callback()), "closed unanswered");
+      assertEqual(events.length, 0);
+    } finally {
+      await sub.close();
+    }
+  });
+
+  await test("properties: every variable, self-closing, CDATA, prefixed names, entities, repeats", async () => {
+    const { sub, events, callback } = await opened();
     try {
       const body =
-        '<e:propertyset xmlns:e="urn:schemas-upnp-org:event-1-0"><e:property>' +
-        "<s:PortMappingNumberOfEntries>3</s:PortMappingNumberOfEntries></e:property></e:propertyset>";
-      await sendToListener(port, { SID: "uuid:s", SEQ: "0" }, body);
-      assertEqual(events[0].properties.PortMappingNumberOfEntries, "3");
+        '<e:propertyset xmlns:e="urn:schemas-upnp-org:event-1-0">' +
+        "<e:property><ExternalIPAddress/></e:property>" +
+        "<e:property><PortMappingNumberOfEntries>3</PortMappingNumberOfEntries><ConnectionStatus>Up</ConnectionStatus></e:property>" +
+        "<e:property><s:Prefixed>p</s:Prefixed></e:property>" +
+        "<e:property><Note><![CDATA[a<b>&c]]></Note></e:property>" +
+        "<e:property><Escaped>x &amp; y &#65;</Escaped></e:property>" +
+        "<e:property><Twice>1</Twice><Twice>2</Twice></e:property>" +
+        "<e:property><Later>1.2.3.4</Later></e:property></e:propertyset>";
+      assertEqual(await sendNotify(callback(), notifyHeaders("uuid:s1", 1), body), 200);
+      await sleep(20);
+      const p = events[0].properties;
+      assertEqual(p.ExternalIPAddress, "");
+      assertEqual(p.PortMappingNumberOfEntries, "3");
+      assertEqual(p.ConnectionStatus, "Up");
+      assertEqual(p.Prefixed, "p");
+      assertEqual(p.Note, "a<b>&c");
+      assertEqual(p.Escaped, "x & y A");
+      assertEqual(p.Twice, "2");
+      assertEqual(p.Later, "1.2.3.4");
     } finally {
-      await listener.close();
+      await sub.close();
     }
   });
 
-  await test("the listener refuses any source but the gateway", async () => {
-    const { listener, port, events } = await listening("192.0.2.1");
+  await test("a NOTIFY whose variables the parser refuses is answered 400, and the listener lives on", async () => {
+    const { sub, events, callback } = await opened();
     try {
-      assertEqual(await sendToListener(port, { SID: "uuid:s", SEQ: "1" }, PROPERTY_SET), 403);
-      assertEqual(events.length, 0);
+      const body =
+        '<e:propertyset xmlns:e="urn:schemas-upnp-org:event-1-0">' +
+        "<e:property><__proto__>p</__proto__></e:property></e:propertyset>";
+      assertEqual(await sendNotify(callback(), notifyHeaders("uuid:s1", 1), body), 400);
+      assertEqual(await sendNotify(callback(), notifyHeaders("uuid:s1", 2)), 200);
+      await sleep(20);
+      assertEqual(events.map((e) => e.seq).join(), "2");
+      assertEqual(({} as any).p, undefined);
     } finally {
-      await listener.close();
+      await sub.close();
     }
   });
 
-  await test("the listener answers 405 to any method but NOTIFY", async () => {
-    const { listener, port, events } = await listening();
+  await test("renews at half the granted lifetime", async () => {
+    const { sub, calls } = await opened({}, { timeout: 2 });
     try {
-      assertEqual(await sendToListener(port, { SID: "uuid:s", SEQ: "1" }, PROPERTY_SET, "POST"), 405);
-      assertEqual(events.length, 0);
+      await sleep(700);
+      assert(!calls.some((c) => c.startsWith("RENEW")), "not yet");
+      await sleep(600);
+      assertEqual(calls.filter((c) => c.startsWith("RENEW")).join(), "RENEW uuid:s1 2");
     } finally {
-      await listener.close();
+      await sub.close();
     }
   });
 
-  await test("the listener answers 412 to a NOTIFY without a SID or a usable sequence number", async () => {
-    const { listener, port, events } = await listening();
+  await test("renews a subscription granted infinite as if granted the lifetime asked", async () => {
+    const { sub, calls } = await opened({ subscribe: async () => ({ sid: "uuid:s1", timeout: null }) }, { timeout: 2 });
     try {
-      assertEqual(await sendToListener(port, { SEQ: "1" }), 412);
-      assertEqual(await sendToListener(port, { SID: "uuid:s" }), 412);
-      assertEqual(await sendToListener(port, { SID: "uuid:s", SEQ: "x" }), 412);
-      assertEqual(await sendToListener(port, { SID: "uuid:s", SEQ: "-1" }), 412);
-      assertEqual(await sendToListener(port, { SID: "uuid:s", SEQ: "1.5" }), 412);
-      assertEqual(events.length, 0);
+      assertEqual(sub.timeout, null);
+      await sleep(1300);
+      assert(calls.some((c) => c.startsWith("RENEW")), "renewed");
     } finally {
-      await listener.close();
+      await sub.close();
     }
   });
 
-  await test("the listener refuses a body over 64 KiB", async () => {
-    const { listener, port, events } = await listening();
+  await test("a refused renewal loses the subscription at once and stops listening", async () => {
+    const { sub, events, calls, callback } = await opened(
+      { renew: async () => Promise.reject(new SubscriptionError("SUBSCRIBE", 412)) },
+      { timeout: 4 }
+    );
+    const started = Date.now();
+    const lost = await new Promise<Error>((resolve) => sub.once("lost", resolve));
+    assert(lost instanceof SubscriptionError && lost.status === 412, String(lost));
+    // Renewed at 2 s; lost then, not retried until the lifetime ends at 4 s.
+    assert(Date.now() - started < 3000, `lost after ${Date.now() - started} ms`);
+    assertEqual(calls.filter((c) => c.startsWith("RENEW")).length, 1);
+    assert(await nothingListening(callback()), "nothing listening");
+    assertEqual(events.length, 0);
+    await sub.close(); // harmless after lost
+  });
+
+  await test("a renewal with no answer is retried, and the subscription stands while it lasts", async () => {
+    let attempts = 0;
+    const { sub, calls } = await opened(
+      {
+        renew: async (sid, t) => {
+          attempts++;
+          if (attempts === 1) throw new Error("socket hang up");
+          return { sid, timeout: t };
+        },
+      },
+      { timeout: 3 }
+    );
+    let lost: Error | null = null;
+    sub.once("lost", (e) => (lost = e));
     try {
-      const status = await sendToListener(port, { SID: "uuid:s", SEQ: "1" }, "x".repeat(70 * 1024)).catch(() => 413);
-      assertEqual(status, 413);
-      assertEqual(events.length, 0);
+      await sleep(2700);
+      assert(attempts >= 2, `retried (${calls.join()})`);
+      assertEqual(lost, null);
     } finally {
-      await listener.close();
+      await sub.close();
     }
   });
 
-  await test("a listener on port 0 takes a free port and names it in its callback", async () => {
-    const { listener, port } = await listening();
-    try {
-      assert(port > 0, `a port, got ${port}`);
-      assertEqual(listener.callback, `http://127.0.0.1:${port}/`);
-    } finally {
-      await listener.close();
-    }
+  await test("a subscription whose renewals go unanswered is lost when it lapses", async () => {
+    const { sub } = await opened({ renew: async () => Promise.reject(new Error("socket hang up")) }, { timeout: 2 });
+    const started = Date.now();
+    const lost = await new Promise<Error>((resolve) => sub.once("lost", resolve));
+    assert(/socket hang up/.test(String(lost)), String(lost));
+    assert(Date.now() - started < 3500, "lost by the end of its lifetime");
   });
 
-  await test("listen() rejects when the port is taken, and close() twice is harmless", async () => {
+  await test("close() unsubscribes and stops listening; twice is harmless, and a refused UNSUBSCRIBE still closes", async () => {
+    const { sub, calls, callback } = await opened({ unsubscribe: async () => Promise.reject(new SubscriptionError("UNSUBSCRIBE", 412)) });
+    await sub.close();
+    await sub.close();
+    assertEqual(calls.filter((c) => c.startsWith("UNSUBSCRIBE")).join(), "UNSUBSCRIBE uuid:s1");
+    assert(await nothingListening(callback()), "nothing listening");
+  });
+
+  await test("open() rejects, with nothing sent, when the port is taken", async () => {
     const taken = http.createServer();
     await new Promise<void>((r) => taken.listen(0, "127.0.0.1", r));
     const port = (taken.address() as AddressInfo).port;
-    const listener = new EventListener({ gateway: "127.0.0.1", host: "127.0.0.1", port });
+    const s = scripted();
     try {
-      const err = await expectThrow(() => listener.listen(() => {}), "listen on a taken port");
+      const err = await expectThrow(
+        () => Subscription.open(s.requests, { gateway: ["127.0.0.1"], host: "127.0.0.1", port, timeout: 1800 }),
+        "open on a taken port"
+      );
       assert(String(err).includes("EADDRINUSE"), String(err));
-      await listener.close();
-      await listener.close();
+      assertEqual(s.calls.length, 0);
     } finally {
       taken.close();
     }
   });
 
-  await test("createEventListener binds the local address and accepts only the gateway", async () => {
-    const restore = installFakeRouter("opnsense");
-    const client = new Client({ url: DESCRIPTION_URL, localAddress: "127.0.0.1" });
-    const listener = await client.createEventListener();
-    const events: UpnpEvent[] = [];
-    try {
-      await listener.listen((e) => events.push(e));
-      const callback = new URL(listener.callback);
-      assertEqual(callback.hostname, "127.0.0.1");
-      // The gateway is 192.0.2.1, so this host's own NOTIFY is refused.
-      assertEqual(await sendToListener(Number(callback.port), { SID: "uuid:s", SEQ: "0" }, PROPERTY_SET), 403);
-      assertEqual(events.length, 0);
-    } finally {
-      await listener.close();
-      client.close();
-      restore();
-    }
-  });
+  /** A router on this host: its description and GENA answers, and a NOTIFY back after each SUBSCRIBE. */
+  async function localRouter(listenOn: string): Promise<{ url: (host: string) => string; close: () => void; sids: string[] }> {
+    const sids: string[] = [];
+    const server = http.createServer((req, res) => {
+      if (req.method === "GET") {
+        res.writeHead(200, { "Content-Type": "text/xml" }).end(
+          '<?xml version="1.0"?><root><device><serviceList><service>' +
+            "<serviceType>urn:schemas-upnp-org:service:WANIPConnection:1</serviceType>" +
+            "<serviceId>urn:upnp-org:serviceId:WANIPConn1</serviceId><controlURL>/ctl</controlURL>" +
+            "<eventSubURL>/evt</eventSubURL><SCPDURL>/scpd.xml</SCPDURL></service></serviceList></device></root>"
+        );
+        return;
+      }
+      if (req.method === "SUBSCRIBE" && req.headers.callback) {
+        const sid = `uuid:local-${sids.length + 1}`;
+        sids.push(sid);
+        res.writeHead(200, { SID: sid, TIMEOUT: "Second-1800" }).end();
+        const callback = String(req.headers.callback).slice(1, -1);
+        const url = new URL(callback);
+        const out = http.request({
+          host: url.hostname.replace(/^\[(.*)\]$/, "$1"),
+          port: Number(url.port),
+          method: "NOTIFY",
+          path: "/",
+          localAddress: listenOn,
+          headers: { ...notifyHeaders(sid, 0), "Content-Length": Buffer.byteLength(PROPERTY_SET) },
+        });
+        out.on("error", () => {});
+        out.end(PROPERTY_SET);
+        return;
+      }
+      res.writeHead(200).end();
+    });
+    await new Promise<void>((r) => server.listen(0, listenOn, r));
+    const port = (server.address() as AddressInfo).port;
+    return {
+      url: (host) => `http://${host}:${port}/rootDesc.xml`,
+      close: () => {
+        server.closeAllConnections();
+        server.close();
+      },
+      sids,
+    };
+  }
+
+  for (const [what, listenOn, host, local] of [
+    ["named by a hostname", "127.0.0.1", "localhost", "127.0.0.1"],
+    ["at an IPv6 address", "::1", "[::1]", "::1"],
+  ] as const) {
+    await test(`a gateway ${what} has its events accepted`, async () => {
+      const router = await localRouter(listenOn);
+      const client = new Client({ url: router.url(host), localAddress: local });
+      try {
+        const sub = await client.subscribe();
+        const event = await within(new Promise<UpnpEvent>((r) => sub.once("event", r)), 2000, "the first event");
+        assertEqual(event.seq, 0);
+        await sub.close();
+      } finally {
+        client.close();
+        router.close();
+      }
+    });
+  }
 
   // ========================================
   // Summary

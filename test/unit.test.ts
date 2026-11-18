@@ -52,7 +52,17 @@ let passed = 0;
 let failed = 0;
 const errors: string[] = [];
 
+let running = "";
+// The summary ends the process itself. A test awaiting what nothing will settle lets the
+// event loop drain instead, and Node would then exit 0 having run none of what follows.
+process.once("beforeExit", () => {
+  console.log(`  \x1b[31m✗\x1b[0m ${running}`);
+  console.log("    never finished: it waits on something nothing is left to do");
+  process.exit(1);
+});
+
 async function test(name: string, fn: () => Promise<void> | void) {
+  running = name;
   try {
     await fn();
     passed++;

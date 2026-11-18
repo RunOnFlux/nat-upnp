@@ -215,6 +215,35 @@ function subscriptionTimeout(value: string): number | null {
   return match ? Number(match[1]) : null;
 }
 
+function validTimeout(value: number | undefined): number {
+  const timeout = value ?? DEFAULT_SUBSCRIPTION_SECONDS;
+  if (!Number.isInteger(timeout) || timeout < 1) {
+    throw new RangeError(`timeout must be a whole number of seconds, at least 1, got ${timeout}`);
+  }
+  return timeout;
+}
+
+/** An absolute http URL; a header value must not carry a line break. */
+function validCallback(value: string): string {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new TypeError(`callback must be an absolute http URL, got ${JSON.stringify(value)}`);
+  }
+  if (url.protocol !== "http:" || /[\r\n<>]/.test(value)) {
+    throw new TypeError(`callback must be an absolute http URL, got ${JSON.stringify(value)}`);
+  }
+  return value;
+}
+
+function validSid(value: string): string {
+  if (typeof value !== "string" || !value || /[\r\n]/.test(value)) {
+    throw new TypeError(`sid must be a non-empty string on one line, got ${JSON.stringify(value)}`);
+  }
+  return value;
+}
+
 /** How much of a response's end is kept for finding its closing tag. */
 const CLOSING_TAG_WINDOW = 256;
 
@@ -563,27 +592,27 @@ export class Device implements IDevice {
    * service's events. The router sends the subscription's first event at once.
    */
   public async subscribe(callback: string, options: SubscribeOpts = {}): Promise<EventSubscription> {
+    const timeout = validTimeout(options.timeout);
     return this.gena("SUBSCRIBE", {
-      CALLBACK: `<${callback}>`,
+      CALLBACK: `<${validCallback(callback)}>`,
       NT: "upnp:event",
-      TIMEOUT: `Second-${options.timeout ?? DEFAULT_SUBSCRIPTION_SECONDS}`,
-    }, options.signal);
+      TIMEOUT: `Second-${timeout}`,
+    }, timeout, options.signal);
   }
 
   public async renewSubscription(sid: string, options: SubscribeOpts = {}): Promise<EventSubscription> {
-    return this.gena("SUBSCRIBE", {
-      SID: sid,
-      TIMEOUT: `Second-${options.timeout ?? DEFAULT_SUBSCRIPTION_SECONDS}`,
-    }, options.signal);
+    const timeout = validTimeout(options.timeout);
+    return this.gena("SUBSCRIBE", { SID: validSid(sid), TIMEOUT: `Second-${timeout}` }, timeout, options.signal);
   }
 
   public async unsubscribe(sid: string, options: RequestOpts = {}): Promise<void> {
-    await this.gena("UNSUBSCRIBE", { SID: sid }, options.signal);
+    await this.gena("UNSUBSCRIBE", { SID: validSid(sid) }, null, options.signal);
   }
 
   private async gena(
     method: "SUBSCRIBE" | "UNSUBSCRIBE",
     headers: Record<string, string>,
+    asked: number | null,
     signal?: AbortSignal
   ): Promise<EventSubscription> {
     signal?.throwIfAborted();
@@ -603,7 +632,10 @@ export class Device implements IDevice {
     if (response.status !== 200) throw new SubscriptionError(method, response.status);
     const sid = headerValue(response.headers?.["sid"]) || headers.SID;
     if (method === "SUBSCRIBE" && !sid) throw new SubscriptionError(method, 200, "no SID");
-    return { sid: sid ?? "", timeout: subscriptionTimeout(headerValue(response.headers?.["timeout"])) };
+    // TIMEOUT is required in the answer; a gateway that leaves it out is taken to grant
+    // what was asked, never "infinite", so the subscription is still renewed.
+    const granted = headerValue(response.headers?.["timeout"]);
+    return { sid: sid ?? "", timeout: granted ? subscriptionTimeout(granted) : asked };
   }
 
   public async run(

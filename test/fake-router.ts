@@ -335,7 +335,20 @@ export function installFakeRouter(router: string, breakage?: Breakage): () => vo
     const req: GenaRequest = { method: config.method, url: config.url, headers: { ...config.headers } };
     genaRequests.push(req);
     if (breakage === "transport") throw new Error("socket hang up");
-    return genaAnswer(req);
+    const answer = genaAnswer(req);
+    const response = { status: answer.status, headers: answer.headers ?? {}, data: "" };
+    // As axios does: a status validateStatus refuses (by default, anything outside 2xx)
+    // rejects with the response attached rather than resolving.
+    const accepted = config.validateStatus
+      ? config.validateStatus(response.status)
+      : response.status >= 200 && response.status < 300;
+    if (!accepted) {
+      throw Object.assign(new Error(`Request failed with status code ${response.status}`), {
+        isAxiosError: true,
+        response,
+      });
+    }
+    return response;
   };
 
   (axios as any).post = async (url: string, body: string, config: any) => {

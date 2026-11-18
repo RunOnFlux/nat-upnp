@@ -20,8 +20,8 @@ export type {
   SubscribeOpts,
 } from "./nat-upnp/device";
 
-export { EventListener } from "./nat-upnp/events";
-export type { UpnpEvent, EventListenerOpts } from "./nat-upnp/events";
+export { Subscription } from "./nat-upnp/events";
+export type { UpnpEvent } from "./nat-upnp/events";
 
 export { Ssdp } from "./nat-upnp/ssdp";
 export type { SearchCallback, ISsdp, SsdpEmitter } from "./nat-upnp/ssdp";

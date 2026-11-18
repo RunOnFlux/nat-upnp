@@ -1,3 +1,4 @@
+import { lookup } from "dns/promises";
 import net from "net";
 import { RawResponse } from "../index";
 import Device, {
@@ -13,10 +14,9 @@ import Device, {
   RequestOpts,
   untilAborted,
   SubscriptionError,
-  EventSubscription,
   SubscribeOpts,
 } from "./device";
-import { EventListener } from "./events";
+import { Subscription } from "./events";
 import Ssdp from "./ssdp";
 
 /**
@@ -575,35 +575,33 @@ export class Client implements IClient {
   }
 
   /**
-   * Subscribe to the WAN connection service's events, delivered to `callback`
-   * (an EventListener's). Not sent twice: a repeat would make a second
-   * subscription.
+   * Subscribe to the WAN connection service's events: a listener on this host's address
+   * towards the gateway (on `port`, or a free one), and a subscription that renews itself.
+   * Throws when this host's address towards the gateway is not known, rather than
+   * listening on every interface.
    */
-  public async subscribe(options: SubscribeOpts & { callback: string }): Promise<EventSubscription> {
-    return this.onGateway(options.signal, (info) => info.gateway.subscribe(options.callback, options), false);
-  }
-
-  /** Throws SubscriptionError 412 when the router no longer holds the subscription. */
-  public async renewSubscription(options: SubscribeOpts & { sid: string }): Promise<EventSubscription> {
-    return this.onGateway(options.signal, (info) => info.gateway.renewSubscription(options.sid, options), false);
-  }
-
-  public async unsubscribe(options: RequestOpts & { sid: string }): Promise<void> {
-    return this.onGateway(options.signal, (info) => info.gateway.unsubscribe(options.sid, options), false);
-  }
-
-  /**
-   * A listener for the gateway's events on this host's address towards it,
-   * accepting NOTIFYs only from the gateway. Call listen() on it before
-   * subscribing with its callback.
-   */
-  public async createEventListener(options: RequestOpts & { port?: number } = {}): Promise<EventListener> {
-    const info = await this.getGateway({ signal: options.signal });
-    return new EventListener({
-      gateway: new URL(info.gateway.description).hostname,
-      host: await untilAborted(info.getLocalAddress(), options.signal),
-      port: options.port ?? 0,
-    });
+  public async subscribe(options: SubscribeOpts & { port?: number } = {}): Promise<Subscription> {
+    const { signal } = options;
+    const timeout = options.timeout ?? 1800;
+    if (!Number.isInteger(timeout) || timeout < 1) {
+      throw new RangeError(`timeout must be a whole number of seconds, at least 1, got ${timeout}`);
+    }
+    const info = await this.getGateway({ signal });
+    const host = await untilAborted(info.getLocalAddress(), signal);
+    if (!host) {
+      throw new Error(`No local address towards ${info.gateway.description}; its events could not reach this host`);
+    }
+    const gateway = await untilAborted(gatewayAddresses(info.gateway.description), signal);
+    // Not sent twice: a repeated SUBSCRIBE would make a second subscription.
+    return Subscription.open(
+      {
+        subscribe: (callback, t) =>
+          this.onGateway(signal, (i) => i.gateway.subscribe(callback, { timeout: t, signal }), false),
+        renew: (sid, t) => this.onGateway(undefined, (i) => i.gateway.renewSubscription(sid, { timeout: t }), false),
+        unsubscribe: (sid) => this.onGateway(undefined, (i) => i.gateway.unsubscribe(sid), false),
+      },
+      { gateway, host, port: options.port ?? 0, timeout }
+    );
   }
 
   /**
@@ -1050,9 +1048,13 @@ export interface IClient {
   getStatusInfo(options?: RequestOpts): Promise<StatusInfo>;
   getPublicIp(options?: RequestOpts): Promise<string>;
   getGateway(options?: RequestOpts): Promise<UpnpInfo>;
-  subscribe(options: SubscribeOpts & { callback: string }): Promise<EventSubscription>;
-  renewSubscription(options: SubscribeOpts & { sid: string }): Promise<EventSubscription>;
-  unsubscribe(options: RequestOpts & { sid: string }): Promise<void>;
-  createEventListener(options?: RequestOpts & { port?: number }): Promise<EventListener>;
+  subscribe(options?: SubscribeOpts & { port?: number }): Promise<Subscription>;
   close(): void;
+}
+
+/** The addresses a gateway's description URL names: an IP literal, or a name's every address. */
+async function gatewayAddresses(description: string): Promise<string[]> {
+  const host = new URL(description).hostname.replace(/^\[(.*)\]$/, "$1");
+  if (net.isIP(host)) return [host];
+  return (await lookup(host, { all: true })).map((a) => a.address);
 }

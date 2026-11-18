@@ -167,25 +167,29 @@ const range = await client.getMappingRange({
 
 ## Events
 
-A router announces changes to its WAN connection service — among them `PortMappingNumberOfEntries`, the size of its mapping table — to subscribers (UPnP eventing, GENA). The listener receives them; the subscription tells the router where to send them:
+A router announces changes to its WAN connection service — among them `PortMappingNumberOfEntries`, the size of its mapping table — to subscribers (UPnP eventing, GENA). `subscribe()` starts a listener and subscribes it:
 
 ```typescript
-const listener = await client.createEventListener({ port: 49152 }); // 0 or omitted: any free port
-await listener.listen((event) => {
-  console.log(event.sid, event.seq, event.properties.PortMappingNumberOfEntries);
+const sub = await client.subscribe({ port: 49152, timeout: 1800 }); // both optional: a free port, 1800 s
+
+sub.on("event", (event) => {
+  console.log(event.seq, event.properties.PortMappingNumberOfEntries);
+});
+sub.on("lost", (reason) => {
+  // a renewal was refused (412 after a router reboot), it lapsed unanswered, or the
+  // listener failed: subscribe again if events are still wanted
 });
 
-const { sid, timeout } = await client.subscribe({ callback: listener.callback }); // asks for 1800 s
-await client.renewSubscription({ sid });   // before `timeout` runs out
-await client.unsubscribe({ sid });
-await listener.close();
+await sub.close(); // UNSUBSCRIBE, and stop listening
 ```
 
-The listener binds to this host's address towards the router and accepts NOTIFYs only from the router's address, so the router must be able to reach that port: a host firewall that drops its connections drops every event. A subscription starts with a NOTIFY carrying every evented variable (`seq` 0); later ones carry what changed, numbered on. Whether an event's `sid` is a current subscription's is the caller's to check.
+The listener binds to this host's address towards the router, and `subscribe()` throws when that address is not known rather than listening on every interface. The router must be able to reach the port: a host firewall that drops its connections drops every event. Connections from any other address are closed unanswered, and NOTIFYs are answered as GENA requires (400 without NT, NTS or a decimal SEQ, or with a body that is not XML; 412 for a SID that is not this subscription's or a wrong NT/NTS; 413 for a body over 64 KiB).
 
-A refusal throws `SubscriptionError` with the HTTP status: a router that rebooted, or whose subscription lapsed, answers a renewal 412, and a new subscription is needed. A SUBSCRIBE answered without a SID is refused the same way. A service whose description gives no event URL throws `UnsupportedActionError`.
+The subscription starts with an event carrying every evented variable (`seq` 0), which can reach this host before the SUBSCRIBE is answered; it is held until then, so it is never lost. Events are emitted after the router has been answered, in the order it numbered them. The subscription renews itself at half of each granted lifetime — also when the router grants "infinite", since a router that reboots forgets it — and is `lost` when a renewal is refused or none is answered before it lapses.
 
-Routers that describe eventing do not all deliver it. Across the Flux fleet some answer SUBSCRIBE without a SID, some send the first NOTIFY and none after, and most signal only changes to the table's size, not a mapping replaced at the same size. A caller that relies on events should confirm a change of its own brings one, and still read the table now and then.
+A SUBSCRIBE the router refuses rejects with `SubscriptionError`, carrying the HTTP status; one answered without a SID is refused the same way. A service whose description gives no event URL throws `UnsupportedActionError`. `Device` also exposes the requests themselves: `subscribe(callback)`, `renewSubscription(sid)` and `unsubscribe(sid)`.
+
+Routers that describe eventing do not all deliver it. Across the Flux fleet some answer SUBSCRIBE without a SID, some send the first event and none after, and most signal only changes to the table's size, not a mapping replaced at the same size. A caller that relies on events should confirm a change of its own brings one, and still read the table now and then.
 
 ## SSDP Bypass
 

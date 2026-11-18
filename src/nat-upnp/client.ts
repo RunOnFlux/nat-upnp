@@ -14,6 +14,7 @@ import Device, {
   RequestOpts,
   untilAborted,
   SubscribeOpts,
+  validTimeout,
 } from "./device";
 import { Subscription } from "./events";
 import Ssdp from "./ssdp";
@@ -582,10 +583,7 @@ export class Client implements IClient {
    */
   public async subscribe(options: SubscribeOpts & { port?: number } = {}): Promise<Subscription> {
     const { signal } = options;
-    const timeout = options.timeout ?? 1800;
-    if (!Number.isInteger(timeout) || timeout < 1) {
-      throw new RangeError(`timeout must be a whole number of seconds, at least 1, got ${timeout}`);
-    }
+    const timeout = validTimeout(options.timeout);
     const info = await this.getGateway({ signal });
     const host = await untilAborted(info.getLocalAddress(), signal);
     if (!host) {
@@ -1066,6 +1064,5 @@ export interface IClient {
 /** The addresses a gateway's description URL names: an IP literal, or a name's every address. */
 async function gatewayAddresses(description: string): Promise<string[]> {
   const host = new URL(description).hostname.replace(/^\[(.*)\]$/, "$1");
-  if (net.isIP(host)) return [host];
   return (await lookup(host, { all: true })).map((a) => a.address);
 }

@@ -205,10 +205,6 @@ const axiosDefaults = {
 const DEFAULT_SUBSCRIPTION_SECONDS = 1800;
 const genaAgent = new http.Agent({ keepAlive: false });
 
-function headerValue(value: unknown): string {
-  return (Array.isArray(value) ? String(value[0] ?? "") : String(value ?? "")).trim();
-}
-
 /** GENA's fixed tokens, shared by the requests sent and the NOTIFYs checked. */
 export const GENA = Object.freeze({
   SUBSCRIBE: "SUBSCRIBE",
@@ -226,13 +222,15 @@ const GRANTED_SECONDS = new RegExp(`^${GENA.TIMEOUT_PREFIX}(\\d+)$`, "i");
  * required in the answer, and one missing or unreadable is taken to grant what was asked:
  * only "infinite" itself means a subscription that never lapses.
  */
-function grantedTimeout(value: string, asked: number | null): number | null {
+function grantedTimeout(value: string | undefined, asked: number | null): number | null {
+  if (value === undefined) return asked;
   if (value.toLowerCase() === GENA.INFINITE) return null;
   const match = GRANTED_SECONDS.exec(value);
   return match ? Number(match[1]) : asked;
 }
 
-function validTimeout(value: number | undefined): number {
+/** The lifetime to ask for, in whole seconds: `value`, or 1800. */
+export function validTimeout(value: number | undefined): number {
   const timeout = value ?? DEFAULT_SUBSCRIPTION_SECONDS;
   if (!Number.isInteger(timeout) || timeout < 1) {
     throw new RangeError(`timeout must be a whole number of seconds, at least 1, got ${timeout}`);
@@ -652,9 +650,12 @@ export class Device implements IDevice {
       validateStatus: () => true,
     });
     if (response.status !== 200) throw new SubscriptionError(method, response.status);
-    const sid = headerValue(response.headers?.["sid"]) || headers.SID;
-    if (method === GENA.SUBSCRIBE && !sid) throw new SubscriptionError(method, 200, "no SID");
-    return { sid: sid ?? "", timeout: grantedTimeout(headerValue(response.headers?.["timeout"]), asked) };
+    // Node trims each value, and joins a repeated header into one string. Only a first
+    // SUBSCRIBE goes without a SID of its own to fall back on.
+    const answer = response.headers as Record<string, string | undefined>;
+    const sid = answer["sid"] || headers.SID;
+    if (!sid) throw new SubscriptionError(method, 200, "no SID");
+    return { sid, timeout: grantedTimeout(answer["timeout"], asked) };
   }
 
   public async run(

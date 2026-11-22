@@ -1,6 +1,6 @@
 {
   "name": "@runonflux/nat-upnp",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "main": "build/src/index.js",
   "types": "build/src/index.d.ts",
   "files": [

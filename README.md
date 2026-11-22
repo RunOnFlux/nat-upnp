@@ -47,6 +47,16 @@ await client.removeMapping({ public: 8080 });
 
 The search goes out again 250, 750, 1750 and 3750 ms after the first until a gateway answers, since UDP loses datagrams and some routers drop searches for a second or more at a time; it stops at the first answer, or when `timeout` (5 s by default) runs out. Only an answer whose location is an IPv4 address is taken: some routers answer twice, with an IPv6 location first, and both the mappings and the host's address are IPv4.
 
+### The Search Port and the Gateway's Address
+
+A router answers a search to the port it came from, but not always from port 1900: libupnp, SoftAtHome and TP-Link/Omada SMB routers answer from a fresh ephemeral port each time. `sourcePort` fixes the port the search goes out from, so a firewall can admit the answers by that destination port alone. The port is not shared with another socket; if one holds it, discovery fails with `EADDRINUSE`.
+
+A LAN can hold another UPnP device beside its gateway (a NAS, an access point left in router mode), and either may answer first. `gateway` returns the address the gateway answers from, and is asked at every discovery; an answer from any other address is ignored, and returning null takes the first answer from any device.
+
+```typescript
+const client = new Client({ cacheGateway: true, sourcePort: 16131, gateway: () => "192.168.1.1" });
+```
+
 Device info and capabilities are fetched lazily on first access and cached; the local address is resolved on every call. All three come at once via `getAll()`:
 
 ```typescript
@@ -263,6 +273,8 @@ The gateway, its description and its capabilities are fetched once and shared be
 |--------|------|---------|-------------|
 | `timeout` | `number` | `5000` | SSDP discovery timeout (ms) |
 | `cacheGateway` | `boolean` | `false` | Keep the discovered gateway between calls; see [Caching the Gateway](#caching-the-gateway) |
+| `sourcePort` | `number` | `0` | UDP port discovery searches from; 0 lets the system pick. See [The Search Port and the Gateway's Address](#the-search-port-and-the-gateways-address) |
+| `gateway` | `() => string \| null` | — | The address the gateway answers from, asked at every discovery; other devices' answers are ignored |
 | `url` | `string` | — | Bypass SSDP, connect directly |
 | `localAddress` | `string` | — | Required when using `url` |
 

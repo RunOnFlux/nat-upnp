@@ -43,7 +43,9 @@ export class Ssdp implements ISsdp {
   private ensureSocket(): void {
     if (this.socket || this.closed) return;
 
-    const socket = dgram.createSocket({ type: "udp4", reuseAddr: true });
+    // No SO_REUSEADDR: a second socket on a fixed source port would share it,
+    // and the kernel hands each unicast answer to only one of them.
+    const socket = dgram.createSocket({ type: "udp4" });
 
     // Store the socket now, before the bind resolves. Waiting for "listening"
     // meant a search arriving during the bind saw no socket and created a
@@ -54,8 +56,8 @@ export class Ssdp implements ISsdp {
 
     // No closed-check needed: close() strips this listener in the same
     // synchronous block that sets the flag, so delivery cannot outlive it.
-    socket.on("message", (message) => {
-      this.parseResponse(message.toString("utf-8"));
+    socket.on("message", (message, rinfo) => {
+      this.parseResponse(message.toString("utf-8"), { address: rinfo.address, port: rinfo.port });
     });
 
     socket.on("listening", async () => {
@@ -104,7 +106,7 @@ export class Ssdp implements ISsdp {
     socket.bind(this.sourcePort);
   }
 
-  private parseResponse(response: string) {
+  private parseResponse(response: string, from: SsdpSender) {
     if (!/^(HTTP|NOTIFY)/m.test(response)) return;
 
     const headers = parseMimeHeader(response);
@@ -113,7 +115,7 @@ export class Ssdp implements ISsdp {
     // Require a valid HTTP Location header — reject missing, empty, or non-http
     if (!headers.location || !headers.location.startsWith("http")) return;
 
-    this.ssdpEmitter.emit("device", headers);
+    this.ssdpEmitter.emit("device", headers, from);
   }
 
   public search(device: string, emitter?: SsdpEmitter): SsdpEmitter {
@@ -158,9 +160,9 @@ export class Ssdp implements ISsdp {
       return timer;
     });
 
-    const ondevice: SearchCallback = (headers) => {
+    const ondevice: SearchCallback = (headers, from) => {
       if (ended || headers.st !== device) return;
-      emitter!.emit("device", headers);
+      emitter!.emit("device", headers, from);
     };
 
     const onerror = (err: Error) => {
@@ -242,7 +244,17 @@ export default Ssdp;
  * ===================
  */
 
-type SearchArgs = [Record<string, string>];
+/**
+ * Where an SSDP answer came from. Routers answer to the search's source port,
+ * but not always from 1900: libupnp, SoftAtHome and TP-Link/Omada SMB routers
+ * answer from a fresh ephemeral port each time.
+ */
+export interface SsdpSender {
+  address: string;
+  port: number;
+}
+
+type SearchArgs = [Record<string, string>, SsdpSender];
 export type SearchCallback = (...args: SearchArgs) => void;
 type EventArgs<E extends Events> = E extends "device"
   ? SearchArgs

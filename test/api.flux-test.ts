@@ -126,6 +126,39 @@ setupTest("NAT-UPNP/Client", (opts) => {
     }
   });
 
+  opts.run("Discovery from a fixed sourcePort finds the gateway", async () => {
+    const sourcePort = 40000 + ~~(Math.random() * 10000);
+    const fixed = new Client({ sourcePort });
+    try {
+      const info = await fixed.getGateway();
+      console.log("  Searched from UDP", sourcePort, "- found", info.gateway.description);
+      return info.gateway.description.startsWith("http");
+    } finally {
+      fixed.close();
+    }
+  });
+
+  opts.run("Discovery given the gateway's address finds it, and given another address does not", async () => {
+    const found = await client.getGateway();
+    const address = new URL(found.gateway.description).hostname;
+    const right = new Client({ gateway: () => address });
+    const wrong = new Client({ gateway: () => "192.0.2.254", timeout: 3000 });
+    try {
+      const info = await right.getGateway();
+      let wrongFound = true;
+      try {
+        await wrong.getGateway();
+      } catch (err) {
+        wrongFound = !/timed out/i.test((err as Error).message);
+      }
+      console.log("  Gateway", address, "found:", info.gateway.description, "- another address found:", wrongFound);
+      return info.gateway.description === found.gateway.description && !wrongFound;
+    } finally {
+      right.close();
+      wrong.close();
+    }
+  });
+
   opts.run("Device info caching — second call is instant", async () => {
     const info = await client.getGateway();
     await info.getDevice(); // first call fetches

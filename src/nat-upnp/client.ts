@@ -107,6 +107,8 @@ export class Client implements IClient {
   private readonly timeout: number;
   private readonly localAddress: string | null;
   private readonly cacheGateway: boolean;
+  private readonly sourcePort: number;
+  private readonly gateway: () => string | null;
   private cachedInfo: UpnpInfo | null = null;
   private pendingGateway: Promise<UpnpInfo> | null = null;
   private abortDiscovery: (() => void) | null = null;
@@ -124,6 +126,8 @@ export class Client implements IClient {
     this.url = options.url || null;
     this.localAddress = options.localAddress || null;
     this.cacheGateway = options.cacheGateway || false;
+    this.sourcePort = validPort(options.sourcePort ?? 0, "sourcePort", 0);
+    this.gateway = options.gateway ?? (() => null);
   }
 
   /**
@@ -703,7 +707,8 @@ export class Client implements IClient {
   private discoverGateway(): Promise<UpnpInfo> {
     // Create a fresh SSDP instance per discovery. It's closed automatically
     // when discovery completes — no socket left open, no leaks.
-    const ssdp = new Ssdp();
+    const ssdp = new Ssdp({ sourcePort: this.sourcePort });
+    const gateway = this.gateway();
     let resolved = false;
 
     const p = ssdp.search(
@@ -719,8 +724,11 @@ export class Client implements IClient {
         }
       }, this.timeout);
 
-      p.on("device", (headers) => {
+      p.on("device", (headers, from) => {
         if (resolved) return;
+        // Another UPnP device on the LAN (a NAS, an access point in router
+        // mode) can answer first; mappings made on it never reach the internet.
+        if (gateway !== null && from.address !== gateway) return;
         // Mappings are IPv4 and the node's address is read from its route to
         // the router, so only an IPv4 location will do. Some routers answer
         // an IPv4 search twice, with an IPv6 location first; the IPv4 answer
@@ -1057,6 +1065,20 @@ export interface ClientOptions {
    * the request once more if the router now answers at a different location.
    */
   cacheGateway?: boolean;
+  /**
+   * The UDP port discovery searches from; the router answers to it. 0 (the
+   * default) lets the system pick one. A fixed port lets a firewall admit the
+   * answers by destination port alone, whatever port the router answers from.
+   * The port is not shared: if another socket holds it, discovery fails with
+   * that error.
+   */
+  sourcePort?: number;
+  /**
+   * The address the gateway answers from, asked at every discovery: an answer
+   * from any other device is ignored. Returning null takes the first answer
+   * from any device (the default).
+   */
+  gateway?: () => string | null;
 }
 
 export interface IClient {

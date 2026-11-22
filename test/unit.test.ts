@@ -3038,10 +3038,11 @@ function getSoapFaultCode(xml: string): number | null {
 
   await test("a sourcePort that is not a port is refused at construction", async () => {
     for (const sourcePort of [-1, 65536, 1.5, "0x1F"]) {
-      await expectThrow(
+      const err = await expectThrow(
         async () => new Client({ sourcePort: sourcePort as number }),
         `sourcePort ${JSON.stringify(sourcePort)}`
       );
+      assert(/^sourcePort /.test((err as Error).message), `the error names the option: ${(err as Error).message}`);
     }
   });
 

@@ -6,7 +6,7 @@
 </specVersion>
 <device>
 <deviceType>urn:schemas-upnp-org:device:InternetGatewayDevice:2</deviceType>
-<friendlyName>InternetGatewayDeviceV2 - FritzBoxunten</friendlyName>
+<friendlyName>InternetGatewayDeviceV2 - [redacted]</friendlyName>
 <manufacturer>FRITZ! GmbH</manufacturer>
 <manufacturerURL>https://fritz.com</manufacturerURL>
 <modelDescription>FRITZ!Box 7530 AX</modelDescription>
@@ -35,7 +35,7 @@
 <deviceList>
 <device>
 <deviceType>urn:schemas-upnp-org:device:WANDevice:2</deviceType>
-<friendlyName>WANDevice - FritzBoxunten</friendlyName>
+<friendlyName>WANDevice - [redacted]</friendlyName>
 <manufacturer>FRITZ! GmbH</manufacturer>
 <manufacturerURL>https://fritz.com</manufacturerURL>
 <modelDescription>WANDevice - FRITZ!Box 7530 AX</modelDescription>
@@ -56,7 +56,7 @@
 <deviceList>
 <device>
 <deviceType>urn:schemas-upnp-org:device:WANConnectionDevice:2</deviceType>
-<friendlyName>WANConnectionDevice - FritzBoxunten</friendlyName>
+<friendlyName>WANConnectionDevice - [redacted]</friendlyName>
 <manufacturer>FRITZ! GmbH</manufacturer>
 <manufacturerURL>https://fritz.com</manufacturerURL>
 <modelDescription>WANConnectionDevice - FRITZ!Box 7530 AX</modelDescription>

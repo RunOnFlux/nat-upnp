@@ -9,6 +9,8 @@ import EventEmitter from "events";
 export class FakeSocket extends EventEmitter {
   readonly sent: { query: string; port: number; address: string }[] = [];
   boundTo: number | null = null;
+  /** The options dgram.createSocket was called with. */
+  createOptions: unknown = null;
   closed = false;
   /** When set, the bind fails instead of succeeding. */
   static failNextBind = false;
@@ -72,17 +74,19 @@ export class FakeSocket extends EventEmitter {
     this.closed = true;
   }
 
-  /** Deliver a datagram as though it had arrived from the network. */
-  deliver(text: string): void {
-    this.emit("message", Buffer.from(text, "utf-8"));
+  /** Deliver a datagram as though it had arrived from the network, sent from `from`. */
+  deliver(text: string, from: { address: string; port: number } = ROUTER_SENDER): void {
+    const buf = Buffer.from(text, "utf-8");
+    this.emit("message", buf, { ...from, family: "IPv4", size: buf.length });
   }
 }
 
 export function installFakeDgram(): { sockets: FakeSocket[]; restore: () => void } {
   const real = dgram.createSocket;
   const sockets: FakeSocket[] = [];
-  (dgram as any).createSocket = (..._args: unknown[]) => {
+  (dgram as any).createSocket = (options: unknown) => {
     const socket = new FakeSocket();
+    socket.createOptions = options;
     sockets.push(socket);
     return socket;
   };
@@ -97,6 +101,9 @@ export function installFakeDgram(): { sockets: FakeSocket[]; restore: () => void
     },
   };
 }
+
+/** The router the default description URL names, answering from SSDP's own port. */
+export const ROUTER_SENDER = { address: "192.0.2.1", port: 1900 };
 
 export const SSDP_SERVER = "FreeBSD/13 UPnP/1.1 MiniUPnPd/2.3.9";
 

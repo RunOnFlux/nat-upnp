@@ -19,6 +19,7 @@ import { SubscriptionError } from "../src/nat-upnp/device";
 import { Subscription, type SubscriptionRequests, type UpnpEvent } from "../src/nat-upnp/events";
 import { parseMimeHeader, Ssdp, type SsdpEmitter } from "../src/nat-upnp/ssdp";
 import { surveyedRouters } from "./router-data";
+import { ssdpProfiles, type SsdpProfile } from "./ssdp-profiles";
 import { installFakeDgram, FakeSocket, ssdpResponse, settle, SSDP_SERVER, ROUTER_SENDER } from "./fake-dgram";
 import {
   installFakeRouter,
@@ -3139,6 +3140,51 @@ function getSoapFaultCode(xml: string): number | null {
     } finally {
       ssdp.close();
       fake.restore();
+    }
+  });
+
+  /** The source port of a profiled router's `i`th SSDP answer. */
+  function answerPort(profile: SsdpProfile, i: number): number {
+    if (profile.answersFrom === "1900") return 1900;
+    if (profile.answersFrom === "fixed") return 16000;
+    if (profile.answersFrom === "mixed") return i === 0 ? 1900 : 40000;
+    return 40000 + 7919 * (i + 1);
+  }
+
+  await test("the survey profiles some captured routers as answering SSDP from a fresh port each time", async () => {
+    assert(
+      Object.values(ssdpProfiles).some((p) => p.answersFrom === "ephemeral"),
+      "an ephemeral profile, or the next test proves nothing about them"
+    );
+  });
+
+  await test("every profiled captured router is found from a fixed sourcePort, whatever port it answers from", async () => {
+    for (const [slug, profile] of Object.entries(ssdpProfiles)) {
+      const expected = surveyedRouters.find((r) => r.slug === slug)!;
+      const fake = installFakeDgram();
+      const restore = installFakeRouter(slug);
+      const client = new Client({ timeout: 300, sourcePort: 16131, gateway: () => ROUTER_SENDER.address });
+      try {
+        const pending = client.getGateway();
+        await settle();
+        for (let i = 0; i < 2; i++) {
+          for (const socket of fake.sockets) {
+            socket.deliver(ssdpResponse(IGD_SEARCH, DESCRIPTION_URL, `SERVER: ${profile.servers[0]}`), {
+              address: ROUTER_SENDER.address,
+              port: answerPort(profile, i),
+            });
+          }
+        }
+        const info = await pending;
+        assertEqual(fake.sockets[0].boundTo, 16131, `${slug}: the search port`);
+        const device = await info.getDevice();
+        assertEqual(device!.manufacturer, expected.manufacturer, `${slug}: its captured description`);
+        assertEqual(device!.ssdpServer, profile.servers[0], `${slug}: its SERVER`);
+      } finally {
+        client.close();
+        restore();
+        fake.restore();
+      }
     }
   });
 

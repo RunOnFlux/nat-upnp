@@ -19,7 +19,7 @@ import { SubscriptionError } from "../src/nat-upnp/device";
 import { Subscription, type SubscriptionRequests, type UpnpEvent } from "../src/nat-upnp/events";
 import { parseMimeHeader, Ssdp, type SsdpEmitter } from "../src/nat-upnp/ssdp";
 import { surveyedRouters } from "./router-data";
-import { installFakeDgram, FakeSocket, ssdpResponse, settle, SSDP_SERVER } from "./fake-dgram";
+import { installFakeDgram, FakeSocket, ssdpResponse, settle, SSDP_SERVER, ROUTER_SENDER } from "./fake-dgram";
 import {
   installFakeRouter,
   requests,
@@ -2868,12 +2868,12 @@ function getSoapFaultCode(xml: string): number | null {
   // This drives the path a client takes when it has to find the router itself.
 
   async function withDiscovery<T>(
-    options: { cacheGateway?: boolean; timeout?: number },
+    options: ConstructorParameters<typeof Client>[0],
     fn: (client: Client, sockets: FakeSocket[], respond: () => void) => Promise<T>
   ): Promise<T> {
     const fake = installFakeDgram();
     const restore = installFakeRouter("opnsense");
-    const client = new Client({ timeout: options.timeout ?? 300, ...options });
+    const client = new Client({ ...options, timeout: options?.timeout ?? 300 });
     const respond = () => {
       for (const socket of fake.sockets) {
         socket.deliver(
@@ -3014,6 +3014,132 @@ function getSoapFaultCode(xml: string): number | null {
       const err = await pending;
       assert(/timed out/i.test((err as Error).message), `got: ${(err as Error).message}`);
     });
+  });
+
+  await test("discovery searches from the client's sourcePort", async () => {
+    await withDiscovery({ sourcePort: 16131 }, async (client, sockets, respond) => {
+      const pending = client.getGateway();
+      await settle();
+      respond();
+      await pending;
+      assertEqual(sockets[0].boundTo, 16131, "the search socket's port");
+    });
+  });
+
+  await test("without a sourcePort discovery searches from a port the system picks", async () => {
+    await withDiscovery({}, async (client, sockets, respond) => {
+      const pending = client.getGateway();
+      await settle();
+      respond();
+      await pending;
+      assertEqual(sockets[0].boundTo, 0, "the search socket's port");
+    });
+  });
+
+  await test("a sourcePort that is not a port is refused at construction", async () => {
+    for (const sourcePort of [-1, 65536, 1.5, "0x1F"]) {
+      const err = await expectThrow(
+        async () => new Client({ sourcePort: sourcePort as number }),
+        `sourcePort ${JSON.stringify(sourcePort)}`
+      );
+      assert(/^sourcePort /.test((err as Error).message), `the error names the option: ${(err as Error).message}`);
+    }
+  });
+
+  // A LAN can hold a second UPnP device beside its gateway (a NAS, an access
+  // point left in router mode); mappings made on it never reach the internet.
+  const OTHER_DEVICE = { address: "192.168.0.108", port: 41417 };
+  const OTHER_LOCATION = "http://192.168.0.108:5000/rootDesc.xml";
+
+  await test("a client given its gateway takes the gateway's answer, not an earlier one from another device", async () => {
+    await withDiscovery({ gateway: () => ROUTER_SENDER.address }, async (client, sockets) => {
+      const pending = client.getGateway();
+      await settle();
+      for (const socket of sockets) {
+        socket.deliver(ssdpResponse(IGD_SEARCH, OTHER_LOCATION), OTHER_DEVICE);
+        socket.deliver(ssdpResponse(IGD_SEARCH, DESCRIPTION_URL), { address: ROUTER_SENDER.address, port: 52620 });
+      }
+      const info = await pending;
+      assertEqual(info.gateway.description, DESCRIPTION_URL, "the gateway's location");
+    });
+  });
+
+  await test("a client whose gateway never answers is not given another device", async () => {
+    await withDiscovery({ gateway: () => ROUTER_SENDER.address, timeout: 300 }, async (client, sockets) => {
+      const pending = expectThrow(() => client.getGateway(), "only another device answers");
+      await settle();
+      for (const socket of sockets) socket.deliver(ssdpResponse(IGD_SEARCH, OTHER_LOCATION), OTHER_DEVICE);
+      const err = await pending;
+      assert(/timed out/i.test((err as Error).message), `got: ${(err as Error).message}`);
+    });
+  });
+
+  await test("a gateway of null takes the first answer, from any device", async () => {
+    await withDiscovery({ gateway: () => null }, async (client, sockets) => {
+      const pending = client.getGateway();
+      await settle();
+      for (const socket of sockets) socket.deliver(ssdpResponse(IGD_SEARCH, OTHER_LOCATION), OTHER_DEVICE);
+      const info = await pending;
+      assertEqual(info.gateway.description, OTHER_LOCATION, "the only answer");
+    });
+  });
+
+  await test("the gateway is asked again at every discovery", async () => {
+    let gateway = OTHER_DEVICE.address;
+    await withDiscovery({ gateway: () => gateway }, async (client, sockets) => {
+      const answerBoth = () => {
+        for (const socket of sockets) {
+          if (socket.closed) continue;
+          socket.deliver(ssdpResponse(IGD_SEARCH, DESCRIPTION_URL), ROUTER_SENDER);
+          socket.deliver(ssdpResponse(IGD_SEARCH, OTHER_LOCATION), OTHER_DEVICE);
+        }
+      };
+      let pending = client.getGateway();
+      await settle();
+      answerBoth();
+      assertEqual((await pending).gateway.description, OTHER_LOCATION, "the first gateway's answer");
+      gateway = ROUTER_SENDER.address;
+      pending = client.getGateway();
+      await settle();
+      answerBoth();
+      assertEqual((await pending).gateway.description, DESCRIPTION_URL, "the moved gateway's answer");
+    });
+  });
+
+  await test("an SSDP answer is delivered with the address and port it came from", async () => {
+    const fake = installFakeDgram();
+    const ssdp = new Ssdp();
+    try {
+      const search = ssdp.search(IGD_SEARCH);
+      const got = new Promise<[Record<string, string>, { address: string; port: number }]>((resolve) =>
+        search.on("device", (headers, from) => resolve([headers, from]))
+      );
+      await settle();
+      fake.sockets[0].deliver(ssdpResponse(IGD_SEARCH, OTHER_LOCATION), OTHER_DEVICE);
+      const [headers, from] = await got;
+      assertEqual(headers.location, OTHER_LOCATION, "the headers");
+      assertEqual(from.address, OTHER_DEVICE.address, "the sender's address");
+      assertEqual(from.port, OTHER_DEVICE.port, "the sender's port");
+    } finally {
+      ssdp.close();
+      fake.restore();
+    }
+  });
+
+  await test("the search socket does not share its port: a fixed port held elsewhere fails the search", async () => {
+    // With SO_REUSEADDR a second socket binds the same UDP port and the kernel
+    // hands each answer to one of them, so a search could lose its answers to
+    // another process without any error.
+    const fake = installFakeDgram();
+    const ssdp = new Ssdp({ sourcePort: 16131 });
+    try {
+      ssdp.search(IGD_SEARCH);
+      const options = fake.sockets[0].createOptions as { reuseAddr?: boolean };
+      assert(!options.reuseAddr, `createSocket options: ${JSON.stringify(options)}`);
+    } finally {
+      ssdp.close();
+      fake.restore();
+    }
   });
 
   await test("discovery that nothing answers times out", async () => {

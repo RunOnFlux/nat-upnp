@@ -46,7 +46,7 @@ export interface RouterExpectation {
 export const surveyedRouters: RouterExpectation[] = [
   {
     "slug": "asustek-computer-asus-wireless-router",
-    "friendlyName": "RT-AX3000-3820",
+    "friendlyName": "RT-AX3000-0000",
     "manufacturerURL": "http://www.asus.com/",
     "modelURL": "http://www.asus.com/",
     "presentationURL": "http://192.168.1.1:80/",
@@ -103,7 +103,7 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "asustek-computer-rt-ac68u",
-    "friendlyName": "RT-AC68U-57C8",
+    "friendlyName": "RT-AC68U-0000",
     "manufacturerURL": "http://www.asus.com/",
     "modelURL": "http://www.asus.com/",
     "presentationURL": "http://192.168.20.1:80/",
@@ -160,7 +160,7 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "asustek-computer-rt-ax55",
-    "friendlyName": "RT-AX55-E988",
+    "friendlyName": "RT-AX55-0000",
     "manufacturerURL": "http://www.asus.com/",
     "modelURL": "http://www.asus.com/",
     "presentationURL": "http://192.168.50.1:80/",
@@ -1070,7 +1070,7 @@ export const surveyedRouters: RouterExpectation[] = [
   },
   {
     "slug": "fritz-fritz-box-7530-ax",
-    "friendlyName": "InternetGatewayDeviceV2 - FritzBoxunten",
+    "friendlyName": "InternetGatewayDeviceV2 - [redacted]",
     "manufacturerURL": "https://fritz.com",
     "modelURL": "https://fritz.com",
     "presentationURL": "http://192.168.2.1",
